@@ -1,0 +1,28 @@
+# Binaries
+github-extractor
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Test binary
+*.test
+
+# Output coverage
+*.out
+
+# Dependency directories
+vendor/
+
+# Go workspace file
+go.work
+
+# Output files
+output.csv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
