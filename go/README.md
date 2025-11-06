@@ -1,14 +1,21 @@
-# GitHub Repository Data Extractor
+# GitHub Repository Data Extractor - HTTP Server
 
-A modular Go program that extracts detailed information from GitHub repositories, including commit counts and milestones.
+A highly concurrent Go server that extracts detailed information from GitHub repositories using full CPU parallelization.
 
 ## Features
 
-- Reads repository list from CSV file
-- Fetches comprehensive repository information using GitHub API
-- Retrieves commit counts and milestone data
-- Outputs results to both console and CSV file
-- Modular architecture for easy maintenance and testing
+- **HTTP API**: RESTful server accepting GET requests with JSON payloads
+- **Full Parallelization**: One repository per CPU core for maximum performance
+- **Comprehensive Data**: Fetches repository info, commits, milestones, and contributors
+- **JSON Output**: Returns structured JSON for each repository
+- **Worker Pool**: Efficient concurrent processing using Go routines
+
+## Architecture
+
+The server uses a worker pool pattern with one worker per CPU core:
+- Jobs are distributed across all available cores
+- Each worker processes repositories independently
+- Results are collected and returned as a single JSON response
 
 ## Prerequisites
 
@@ -24,118 +31,174 @@ A modular Go program that extracts detailed information from GitHub repositories
 
 2. **Set the environment variable:**
    ```bash
-   export YOSHI-GH-TOKEN="your_github_token_here"
+   export YOSHI_GH_TOKEN="your_github_token_here"
    ```
 
-3. **Install dependencies:**
-   ```bash
-   cd go
-   go mod download
-   ```
-
-## Project Structure
-
-```
-go/
-├── main.go              # Entry point
-├── config/
-│   └── config.go        # Configuration management
-├── models/
-│   └── repository.go    # Data models
-├── github/
-│   └── client.go        # GitHub API client
-├── csv/
-│   ├── reader.go        # CSV input reading
-│   └── writer.go        # CSV output writing
-└── go.mod               # Go module definition
-```
-
-## Usage
-
-1. **Prepare input file:**
-   Create `input.csv` in the project root with the following format:
-   ```csv
-   owner,repo
-   tensorflow,tensorflow
-   microsoft,vscode
-   ```
-
-2. **Run the program:**
-   ```bash
-   cd go
-   go run main.go
-   ```
-
-   Or build and run:
+3. **Build the server:**
    ```bash
    cd go
    go build -o github-extractor
-   ./github-extractor
    ```
 
-3. **Output:**
-   - Console: Displays detailed information for each repository
-   - File: Creates `output.csv` in the project root with all extracted data
+## Usage
 
-## Output CSV Fields
+### Start the Server
 
-The program extracts the following information for each repository:
+```bash
+cd go
+./github-extractor
+```
 
-- **Owner**: Repository owner
-- **Repo**: Repository name
-- **Description**: Repository description
-- **Stars**: Number of stars
-- **Forks**: Number of forks
-- **OpenIssues**: Number of open issues
-- **Language**: Primary programming language
-- **CreatedAt**: Creation date
-- **UpdatedAt**: Last update date
-- **Commits**: Total number of commits
-- **Milestones**: Total number of milestones (open + closed)
-- **Size**: Repository size in KB
-- **Watchers**: Number of watchers
-- **HasIssues**: Whether issues are enabled
-- **HasWiki**: Whether wiki is enabled
-- **DefaultBranch**: Default branch name
-- **License**: License type
-- **Error**: Any errors encountered during fetching
+The server will start on port 8080 (configurable via `PORT` environment variable).
+
+### API Endpoints
+
+#### Health Check
+```bash
+GET /health
+```
+
+Response:
+```json
+{
+  "status": "ok",
+  "cores": 8
+}
+```
+
+#### Extract Repository Data
+```bash
+GET /extract
+Content-Type: application/json
+
+{
+  "input_file_path": "/absolute/path/to/input.csv"
+}
+```
+
+**Request Parameters:**
+- `input_file_path` (string, required): Absolute path to the input CSV file
+
+**Response:**
+```json
+{
+  "repositories": [
+    {
+      "owner": "tensorflow",
+      "repo": "tensorflow",
+      "description": "An Open Source Machine Learning Framework...",
+      "stars": 180000,
+      "forks": 74000,
+      "open_issues": 2000,
+      "language": "C++",
+      "created_at": "2015-11-07T01:19:20Z",
+      "updated_at": "2024-11-06T10:30:15Z",
+      "commits": 50000,
+      "milestones": 45,
+      "contributors": ["user1", "user2", "user3", ...],
+      "size": 250000,
+      "watchers": 9000,
+      "has_issues": true,
+      "has_wiki": true,
+      "default_branch": "main",
+      "license": "Apache License 2.0"
+    }
+  ],
+  "total_count": 1
+}
+```
+
+### Example Request
+
+```bash
+curl -X GET http://localhost:8080/extract \
+  -H "Content-Type: application/json" \
+  -d '{"input_file_path": "/home/user/input.csv"}'
+```
+
+## Input CSV Format
+
+The input CSV file must have the following format:
+
+```csv
+owner,repo
+tensorflow,tensorflow
+microsoft,vscode
+golang,go
+```
+
+## Output Data Fields
+
+Each repository object in the JSON response contains:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `owner` | string | Repository owner |
+| `repo` | string | Repository name |
+| `description` | string | Repository description |
+| `stars` | int | Number of stars |
+| `forks` | int | Number of forks |
+| `open_issues` | int | Number of open issues |
+| `language` | string | Primary programming language |
+| `created_at` | timestamp | Creation date |
+| `updated_at` | timestamp | Last update date |
+| `commits` | int | Total number of commits |
+| `milestones` | int | Total milestones (open + closed) |
+| `contributors` | array | List of contributor usernames |
+| `size` | int | Repository size in KB |
+| `watchers` | int | Number of watchers |
+| `has_issues` | bool | Whether issues are enabled |
+| `has_wiki` | bool | Whether wiki is enabled |
+| `default_branch` | string | Default branch name |
+| `license` | string | License type |
+| `error` | string | Error message (if any) |
+
+## Performance
+
+- **Parallel Processing**: Utilizes all CPU cores simultaneously
+- **Concurrent API Calls**: Each repository is fetched independently
+- **Efficient Resource Usage**: Worker pool pattern prevents resource exhaustion
+- **Scalable**: Can handle hundreds of repositories efficiently
+
+### Example Performance
+- 15 repositories on 8-core machine: ~30-60 seconds (depending on repository size)
+- Processing time scales with the largest repository, not the total number
 
 ## Error Handling
 
-- If the `YOSHI-GH-TOKEN` environment variable is not set, the program will exit with an error
-- If a repository cannot be accessed, the error will be logged in the output CSV
-- Network errors and API rate limits are handled gracefully
+- Missing token: Server won't start
+- Invalid input file: Returns 400 Bad Request
+- Repository access errors: Logged in individual repository objects
+- API rate limits: Handled gracefully per repository
+
+## Development
+
+### Project Structure
+```
+go/
+├── main.go              # Entry point & server setup
+├── config/
+│   └── config.go        # Configuration management
+├── models/
+│   └── repository.go    # Data structures
+├── github/
+│   └── client.go        # GitHub API client
+├── csv/
+│   └── reader.go        # CSV input reading
+└── server/
+    └── handler.go       # HTTP handlers & worker pool
+```
+
+### Testing
+
+Use the provided test script:
+```bash
+./test-server.sh
+```
 
 ## Notes
 
-- The program respects GitHub API rate limits
-- Large repositories with many commits may take longer to process
-- Make sure your token has sufficient permissions to access the repositories
-
-## Example
-
-```bash
-# Set token
-export YOSHI-GH-TOKEN="ghp_your_token_here"
-
-# Run program
-cd go
-go run main.go
-
-# Output
-Found 15 repositories to process
-
-[1/15] Fetching information for tensorflow/tensorflow...
-  Repository: tensorflow/tensorflow
-  Description: An Open Source Machine Learning Framework for Everyone
-  Language: C++
-  Stars: 180000 | Forks: 74000 | Watchers: 9000
-  Open Issues: 2000
-  Commits: 50000 | Milestones: 45
-  ...
---------------------------------------------------------------------------------
-...
-
-✓ Successfully processed 15 repositories
-✓ Output written to ../output.csv
-```
+- The server processes all repositories before returning the response
+- Large repositories (e.g., Linux kernel) may take longer to process
+- GitHub API rate limits: 5,000 requests/hour with authentication
+- Contributors list may be truncated for repositories with thousands of contributors

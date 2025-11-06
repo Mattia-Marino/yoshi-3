@@ -8,13 +8,14 @@ import (
 const (
 	// TokenEnvVar is the environment variable name for GitHub token
 	TokenEnvVar = "YOSHI_GH_TOKEN"
+	// DefaultPort is the default HTTP server port
+	DefaultPort = "8080"
 )
 
 // Config holds application configuration
 type Config struct {
 	GitHubToken string
-	InputFile   string
-	OutputFile  string
+	Port        string
 }
 
 // Load loads configuration from environment and returns Config
@@ -24,9 +25,13 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("environment variable %s is not set", TokenEnvVar)
 	}
 
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = DefaultPort
+	}
+
 	return &Config{
 		GitHubToken: token,
-		InputFile:   "input.csv",
-		OutputFile:  "output.csv",
+		Port:        port,
 	}, nil
 }

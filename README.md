@@ -4,71 +4,202 @@ Reimplementation of YOSHI for the course of Software Evolution and Quality at Un
 
 ## Overview
 
-This project contains a modular Go program that extracts detailed information from GitHub repositories. The program reads a list of repositories from `input.csv`, fetches data using the GitHub API, and outputs the results to both the console and `output.csv`.
+A high-performance HTTP server written in Go that extracts comprehensive information from GitHub repositories using full CPU parallelization. The server accepts GET requests with JSON payloads and returns detailed repository data including commits, milestones, and contributors.
+
+## Key Features
+
+- 🚀 **Full Parallelization**: One repository per CPU core for maximum throughput
+- 🌐 **HTTP API**: RESTful server with JSON input/output
+- 📊 **Comprehensive Data**: Repository info, commits, milestones, and contributors
+- ⚡ **High Performance**: Worker pool pattern with concurrent API calls
+- 🔧 **Modular Architecture**: Clean separation of concerns
 
 ## Quick Start
 
 1. **Set up your GitHub token:**
    ```bash
-   export YOSHI-GH-TOKEN="your_github_token_here"
+   export YOSHI_GH_TOKEN="your_github_token_here"
    ```
 
-2. **Run the program:**
+2. **Start the server:**
    ```bash
    cd go
-   go run main.go
+   go build -o github-extractor
+   ./github-extractor
    ```
 
-3. **Check the output:**
-   - Console output shows progress and details for each repository
-   - `output.csv` contains all extracted data in CSV format
+3. **Make a request:**
+   ```bash
+   curl -X GET http://localhost:8080/extract \
+     -H "Content-Type: application/json" \
+     -d '{"input_file_path": "/absolute/path/to/input.csv"}'
+   ```
 
-## Features
+## API Endpoints
 
-- ✅ Modular Go architecture with separate packages for each concern
-- ✅ Fetches comprehensive repository information from GitHub API
-- ✅ Retrieves commit counts and milestone data
-- ✅ Error handling with detailed error messages
-- ✅ CSV input/output support
-- ✅ Environment variable configuration
+### Health Check
+```
+GET /health
+```
+Returns server status and number of CPU cores being used.
+
+### Extract Repository Data
+```
+GET /extract
+Content-Type: application/json
+
+{
+  "input_file_path": "/absolute/path/to/input.csv"
+}
+```
+
+Returns JSON with all repository information:
+```json
+{
+  "repositories": [
+    {
+      "owner": "tensorflow",
+      "repo": "tensorflow",
+      "stars": 180000,
+      "commits": 50000,
+      "milestones": 45,
+      "contributors": ["user1", "user2", ...],
+      ...
+    }
+  ],
+  "total_count": 1
+}
+```
+
+## Architecture
+
+```
+Client Request
+      ↓
+HTTP Server (port 8080)
+      ↓
+Worker Pool (N cores)
+      ↓
+GitHub API (parallel)
+      ↓
+JSON Response
+```
+
+### Parallelization Model
+
+- **Worker Pool**: Creates N workers where N = number of CPU cores
+- **Job Distribution**: Repositories are distributed across workers via channels
+- **Concurrent Execution**: Each worker processes repositories independently
+- **Result Collection**: All results are aggregated and returned as single JSON
+
+## Input Format
+
+**input.csv** (requires absolute path):
+```csv
+owner,repo
+tensorflow,tensorflow
+microsoft,vscode
+golang,go
+```
+
+## Output Data
+
+Each repository JSON object contains 19 fields:
+
+| Category | Fields |
+|----------|--------|
+| **Identity** | owner, repo, description |
+| **Metrics** | stars, forks, watchers, open_issues, size |
+| **Activity** | commits, milestones, contributors |
+| **Metadata** | language, created_at, updated_at, default_branch, license |
+| **Features** | has_issues, has_wiki |
+| **Errors** | error (if any) |
+
+## Performance
+
+- **Concurrency**: Utilizes all CPU cores (GOMAXPROCS set to NumCPU)
+- **Scalability**: Linear scaling with number of cores
+- **Efficiency**: Non-blocking I/O with goroutines
+- **Resource Management**: Bounded worker pool prevents resource exhaustion
+
+### Example Benchmarks
+- 15 repositories on 8-core machine: ~30-60 seconds
+- Processing time depends on largest repository size
+- GitHub API rate limit: 5,000 requests/hour (authenticated)
 
 ## Project Structure
 
 ```
-├── input.csv           # Input file with owner,repo list
-├── output.csv          # Generated output with repository data
-├── README.md           # This file
-└── go/                 # Go application
-    ├── main.go         # Entry point
-    ├── config/         # Configuration management
-    ├── models/         # Data models
-    ├── github/         # GitHub API client
-    ├── csv/            # CSV reader and writer
-    └── README.md       # Detailed Go documentation
+.
+├── input.csv              # Sample input
+├── test-server.sh         # Testing script
+├── README.md              # This file
+└── go/                    # Go application
+    ├── main.go            # Server entry point
+    ├── config/            # Configuration
+    ├── models/            # Data structures
+    ├── github/            # GitHub API client
+    ├── csv/               # CSV reader
+    └── server/            # HTTP handlers & workers
 ```
+
+## Testing
+
+Use the provided test script:
+```bash
+./test-server.sh
+```
+
+This will:
+1. Start the server
+2. Test health endpoint
+3. Make a request with input.csv
+4. Save response to output.json
+5. Display summary
+6. Stop the server
 
 ## Documentation
 
-For detailed documentation about the Go program, see [go/README.md](go/README.md).
+- **README.md**: Main project overview (this file)
+- **go/README.md**: Detailed API and implementation docs
+- **IMPLEMENTATION.md**: Technical implementation details (legacy)
 
 ## Requirements
 
 - Go 1.21 or higher
 - GitHub Personal Access Token with `repo` permissions
-- Input CSV file with `owner` and `repo` columns
-
-## Output Data
-
-The program extracts the following information for each repository:
-- Basic info: owner, name, description, language
-- Metrics: stars, forks, watchers, open issues, size
-- **Commits**: Total number of commits
-- **Milestones**: Total number of milestones (open + closed)
-- Metadata: creation date, last update, default branch, license
-- Flags: has issues, has wiki
+- Linux/macOS/Windows with bash (for test script)
 
 ## Error Handling
 
-- Missing `YOSHI-GH-TOKEN` environment variable → Program exits with error
-- Invalid or inaccessible repositories → Error logged in output CSV
-- Network issues → Gracefully handled with error messages
+| Error | HTTP Status | Response |
+|-------|-------------|----------|
+| Missing token | N/A | Server won't start |
+| Invalid JSON | 400 | `{"error": "Invalid JSON: ..."}` |
+| Missing input_file_path | 400 | `{"error": "input_file_path is required"}` |
+| Invalid CSV file | 400 | `{"error": "Failed to read input file: ..."}` |
+| Repository errors | 200 | Logged in repository object's `error` field |
+
+## Environment Variables
+
+- `YOSHI_GH_TOKEN` (required): GitHub Personal Access Token
+- `PORT` (optional): Server port (default: 8080)
+
+## Differences from Previous Version
+
+### Before (CLI Tool)
+- Sequential processing
+- CSV output only
+- Console logging
+- No parallelization
+
+### Now (HTTP Server)
+- Full parallelization (one repo per core)
+- JSON API
+- RESTful architecture
+- Worker pool pattern
+- Contributor data included
+
+## License
+
+Academic project for Software Evolution and Quality course.

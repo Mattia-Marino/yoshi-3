@@ -3,6 +3,7 @@ package github
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"github.com/google/go-github/v57/github"
 
@@ -79,23 +80,55 @@ func (c *Client) GetRepositoryInfo(owner, repo string) models.RepositoryInfo {
 		info.License = *repository.License.Name
 	}
 
+	// Use wait group to fetch commits, milestones, and contributors concurrently
+	var wg sync.WaitGroup
+	var commitErr, milestoneErr, contributorErr error
+	var commits, milestones int
+	var contributors []string
+
+	wg.Add(3)
+
 	// Get number of commits
-	commits, err := c.getCommitCount(owner, repo)
-	if err != nil {
-		info.Error = fmt.Sprintf("Failed to fetch commits: %v", err)
+	go func() {
+		defer wg.Done()
+		commits, commitErr = c.getCommitCount(owner, repo)
+	}()
+
+	// Get number of milestones
+	go func() {
+		defer wg.Done()
+		milestones, milestoneErr = c.getMilestoneCount(owner, repo)
+	}()
+
+	// Get contributors
+	go func() {
+		defer wg.Done()
+		contributors, contributorErr = c.getContributors(owner, repo)
+	}()
+
+	wg.Wait()
+
+	// Process results
+	if commitErr != nil {
+		info.Error = fmt.Sprintf("Failed to fetch commits: %v", commitErr)
 	} else {
 		info.Commits = commits
 	}
 
-	// Get number of milestones
-	milestones, err := c.getMilestoneCount(owner, repo)
-	if err != nil {
-		// Don't overwrite error if it already exists
+	if milestoneErr != nil {
 		if info.Error == "" {
-			info.Error = fmt.Sprintf("Failed to fetch milestones: %v", err)
+			info.Error = fmt.Sprintf("Failed to fetch milestones: %v", milestoneErr)
 		}
 	} else {
 		info.Milestones = milestones
+	}
+
+	if contributorErr != nil {
+		if info.Error == "" {
+			info.Error = fmt.Sprintf("Failed to fetch contributors: %v", contributorErr)
+		}
+	} else {
+		info.Contributors = contributors
 	}
 
 	return info
@@ -177,4 +210,34 @@ func (c *Client) getMilestoneCount(owner, repo string) (int, error) {
 	}
 
 	return openCount + closedCount, nil
+}
+
+// getContributors returns the list of contributor usernames
+func (c *Client) getContributors(owner, repo string) ([]string, error) {
+	opts := &github.ListContributorsOptions{
+		ListOptions: github.ListOptions{
+			PerPage: 100,
+		},
+	}
+
+	var allContributors []string
+	for {
+		contributors, resp, err := c.client.Repositories.ListContributors(c.ctx, owner, repo, opts)
+		if err != nil {
+			return nil, err
+		}
+
+		for _, contributor := range contributors {
+			if contributor.Login != nil {
+				allContributors = append(allContributors, *contributor.Login)
+			}
+		}
+
+		if resp.NextPage == 0 {
+			break
+		}
+		opts.Page = resp.NextPage
+	}
+
+	return allContributors, nil
 }
