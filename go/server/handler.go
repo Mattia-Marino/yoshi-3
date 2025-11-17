@@ -37,6 +37,13 @@ func NewHandler(ghClient *github.Client) *Handler {
 	}
 }
 
+// HealthCheckHandler handles health check requests
+func (h *Handler) HealthCheckHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	fmt.Fprintf(w, `{"status":"ok","cores":%d}`, runtime.NumCPU())
+}
+
 // ExtractHandler handles the GET request for extracting repository information
 func (h *Handler) ExtractHandler(w http.ResponseWriter, r *http.Request) {
 	// Only accept GET requests

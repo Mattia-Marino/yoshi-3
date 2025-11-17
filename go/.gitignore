@@ -26,3 +26,6 @@ output.csv
 *.swp
 *.swo
 *~
+
+# Log files
+*.log
