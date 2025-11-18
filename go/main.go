@@ -1,54 +1,100 @@
 package main
 
 import (
-	"fmt"
-	"log"
+	"context"
 	"net/http"
+	"os"
+	"os/signal"
 	"runtime"
+	"syscall"
+	"time"
 
 	"github-extractor/config"
 	"github-extractor/github"
 	"github-extractor/server"
+
+	"github-extractor/logger"
+	"github-extractor/middleware"
+
+	stdlog "log"
+
+	"github.com/sirupsen/logrus"
 )
 
 func main() {
+
+	// Initialize logger
+	logFile, logLevel := config.LoadLoggingConfig()
+	if logLevel == "" {
+		logLevel = "info"
+	}
+	appLogger := logger.Init(logFile, logLevel)
+	appLogger.WithField("level", appLogger.Level.String()).Info("Logger configured")
+
+	// Redirect standard library logger output into logrus so other packages' logs
+	// go through the same writer/rotator and formatting.
+	stdlog.SetOutput(appLogger.Writer())
+	stdlog.SetFlags(0)
+
+	// Startup message as debug-level (logger already set to debug if LOG_LEVEL=debug)
+	appLogger.Info("Starting the server...")
+
 	// Load configuration
-	cfg, err := config.Load()
+	cfg, err := config.LoadConfig()
 	if err != nil {
-		log.Fatalf("Configuration error: %v", err)
+		appLogger.WithField("error", err).Fatal("Configuration error")
 	}
 
 	// Set GOMAXPROCS to use all available CPU cores
 	numCPU := runtime.NumCPU()
 	runtime.GOMAXPROCS(numCPU)
 
-	log.Printf("GitHub Repository Extractor Server")
-	log.Printf("Using %d CPU cores for parallel processing", numCPU)
+	appLogger.Info("GitHub Repository Extractor Server")
+	appLogger.Infof("Using %d CPU cores for parallel processing", numCPU)
 
 	// Create GitHub client
 	ghClient := github.NewClient(cfg.GitHubToken)
 
-	// Create HTTP handler
-	handler := server.NewHandler(ghClient)
+	// Initialize service with worker pool
+	service := server.NewService(ghClient)
 
-	// Register routes
-	http.HandleFunc("/extract", handler.ExtractHandler)
-	http.HandleFunc("/health", healthCheckHandler)
+	// Initialize handler
+	ghHandler := server.NewHandler(service)
 
-	// Start server
-	address := fmt.Sprintf(":%s", cfg.Port)
-	log.Printf("Server starting on %s", address)
-	log.Printf("Endpoint: GET /extract")
-	log.Printf("Health check: GET /health")
+	// Setup routes
+	router := server.SetupRoutes(ghHandler)
 
-	if err := http.ListenAndServe(address, nil); err != nil {
-		log.Fatalf("Server failed to start: %v", err)
+	// Wrap router with logging middleware
+	handler := middleware.LoggingMiddleware(appLogger)(router)
+
+	s := &http.Server{
+		Addr:         ":" + cfg.Port,
+		Handler:      handler,
+		ReadTimeout:  15 * time.Second,
+		WriteTimeout: 15 * time.Second,
+		IdleTimeout:  60 * time.Second,
 	}
-}
 
-// healthCheckHandler handles health check requests
-func healthCheckHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	fmt.Fprintf(w, `{"status":"ok","cores":%d}`, runtime.NumCPU())
+	// Start server in a goroutine
+	go func() {
+		appLogger.WithFields(logrus.Fields{"port": cfg.Port}).Info("Server is running")
+		if err := s.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			appLogger.WithField("error", err).Fatal("Server failed to start")
+		}
+	}()
+
+	// Wait for interrupt signal to gracefully shutdown the server
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+	appLogger.Info("Shutting down server...")
+
+	// Graceful shutdown with timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	if err := s.Shutdown(ctx); err != nil {
+		appLogger.WithField("error", err).Fatal("Server forced to shutdown")
+	}
+	appLogger.Info("Server exited")
 }
