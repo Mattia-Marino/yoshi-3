@@ -3,7 +3,10 @@ package github
 import (
 	"context"
 	"fmt"
+	"net"
+	"net/http"
 	"sync"
+	"time"
 
 	"github.com/google/go-github/v57/github"
 
@@ -14,14 +17,30 @@ import (
 type Client struct {
 	client *github.Client
 	ctx    context.Context
+	token  string
 }
 
 // NewClient creates a new GitHub API client
 func NewClient(token string) *Client {
-	client := github.NewClient(nil).WithAuthToken(token)
+	// custom http client with longer timeout and tuned transport
+	httpClient := &http.Client{
+		Timeout: 120 * time.Second, // aumenta timeout per chiamate GitHub
+		Transport: &http.Transport{
+			Proxy:                 http.ProxyFromEnvironment,
+			DialContext:           (&net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
+			IdleConnTimeout:       90 * time.Second,
+			TLSHandshakeTimeout:   10 * time.Second,
+			ExpectContinueTimeout: 1 * time.Second,
+			MaxIdleConns:          100,
+			MaxIdleConnsPerHost:   20,
+		},
+	}
+
+	client := github.NewClient(httpClient).WithAuthToken(token)
 	return &Client{
 		client: client,
 		ctx:    context.Background(),
+		token:  token,
 	}
 }
 
@@ -128,7 +147,17 @@ func (c *Client) GetRepositoryInfo(owner, repo string) models.RepositoryInfo {
 			info.Error = fmt.Sprintf("Failed to fetch contributors: %v", contributorErr)
 		}
 	} else {
-		info.Contributors = contributors
+		// convert usernames into detailed contributor profiles
+		details, detErr := models.GetContributorsDetails(c.ctx, c.token, contributors)
+		if detErr != nil {
+			if info.Error == "" {
+				info.Error = fmt.Sprintf("Failed to fetch contributor details: %v", detErr)
+			}
+			// Even if detailed fetch failed, return repository with empty contributors
+			info.Contributors = nil
+		} else {
+			info.Contributors = details
+		}
 	}
 
 	return info

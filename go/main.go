@@ -67,18 +67,18 @@ func main() {
 	// Wrap router with logging middleware
 	handler := middleware.LoggingMiddleware(appLogger)(router)
 
-	s := &http.Server{
+	srv := &http.Server{
 		Addr:         ":" + cfg.Port,
 		Handler:      handler,
-		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 15 * time.Second,
+		ReadTimeout:  30 * time.Second,
+		WriteTimeout: 300 * time.Second, // aumentato per risposte lunghe
 		IdleTimeout:  60 * time.Second,
 	}
 
 	// Start server in a goroutine
 	go func() {
 		appLogger.WithFields(logrus.Fields{"port": cfg.Port}).Info("Server is running")
-		if err := s.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			appLogger.WithField("error", err).Fatal("Server failed to start")
 		}
 	}()
@@ -93,7 +93,7 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	if err := s.Shutdown(ctx); err != nil {
+	if err := srv.Shutdown(ctx); err != nil {
 		appLogger.WithField("error", err).Fatal("Server forced to shutdown")
 	}
 	appLogger.Info("Server exited")
