@@ -4,12 +4,6 @@ import (
 	"time"
 )
 
-// RepositoryInput represents a repository from the input CSV
-type RepositoryInput struct {
-	Owner string
-	Repo  string
-}
-
 // RepositoryInfo contains all information about a GitHub repository
 type RepositoryInfo struct {
 	Owner         string    `json:"owner"`

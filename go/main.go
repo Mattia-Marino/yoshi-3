@@ -55,8 +55,11 @@ func main() {
 	// Create GitHub client
 	ghClient := github.NewClient(cfg.GitHubToken)
 
+	// Initialize service with worker pool
+	service := server.NewService(ghClient)
+
 	// Initialize handler
-	ghHandler := server.NewHandler(ghClient)
+	ghHandler := server.NewHandler(service)
 
 	// Setup routes
 	router := server.SetupRoutes(ghHandler)
