@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"runtime"
 
+	"github-extractor/github"
 	"github-extractor/models"
 )
 
@@ -66,6 +68,24 @@ func (h *Handler) ExtractHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// assume owner and repo variables contain request values
+	token := os.Getenv("YOSHI_GH_TOKEN") // or where your app reads it
+	gh := github.NewClient(token)
+
+	// Run fast eligibility checks first (100 commits, last 90 days, 10 active contributors)
+	ok, reason, err := gh.CheckRepoEligibility(req.Owner, req.Repo, 100, 90, 10)
+	if err != nil {
+		http.Error(w, "internal error checking repository eligibility: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if !ok {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnprocessableEntity) // 422
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": reason})
+		return
+	}
+
+	// --- existing code continues only if checks passed ---
 	// Process repository using the service (will be assigned to a free worker)
 	result := h.service.ProcessRepository(req.Owner, req.Repo)
 
