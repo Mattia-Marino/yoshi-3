@@ -68,8 +68,8 @@ func (h *Handler) ExtractHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// assume owner and repo variables contain request values
-	token := os.Getenv("YOSHI_GH_TOKEN") // or where your app reads it
+	// TODO: Fix code here, token already present and gh client already initalized in main
+	token := os.Getenv("YOSHI_GH_TOKEN")
 	gh := github.NewClient(token)
 
 	// Run fast eligibility checks first (100 commits, last 90 days, 10 active contributors)

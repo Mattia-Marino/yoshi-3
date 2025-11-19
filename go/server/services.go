@@ -3,7 +3,6 @@ package server
 import (
 	"log"
 	"runtime"
-	"sync"
 
 	"github-extractor/github"
 	"github-extractor/models"
@@ -11,10 +10,9 @@ import (
 
 // Service handles business logic for repository extraction
 type Service struct {
-	ghClient   *github.Client
-	jobQueue   chan RepositoryRequest
-	resultPool sync.Map
-	workers    int
+	ghClient *github.Client
+	jobQueue chan RepositoryRequest
+	workers  int
 }
 
 // RepositoryRequest represents a single repository extraction request

@@ -8,15 +8,14 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/go-github/v57/github"
-	"golang.org/x/oauth2"
+	gith "github.com/google/go-github/v57/github"
 
 	"github-extractor/models"
 )
 
 // Client wraps the GitHub API client
 type Client struct {
-	client *github.Client
+	client *gith.Client
 	ctx    context.Context
 	token  string
 }
@@ -33,31 +32,14 @@ func NewClient(token string) *Client {
 		MaxIdleConnsPerHost:   20,
 	}
 
-	// default http client (no auth)
+	// Default http client
 	defaultHTTP := &http.Client{
 		Timeout:   120 * time.Second,
 		Transport: baseTransport,
 	}
 
-	var gh *github.Client
-	if token != "" {
-		// create oauth2 transport that uses our base transport
-		ts := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: token})
-		oauthTransport := &oauth2.Transport{
-			Source: ts,
-			Base:   baseTransport,
-		}
-		httpClient := &http.Client{
-			Timeout:   120 * time.Second,
-			Transport: oauthTransport,
-		}
-		gh = github.NewClient(httpClient)
-	} else {
-		gh = github.NewClient(defaultHTTP)
-	}
-
 	return &Client{
-		client: gh,
+		client: gith.NewClient(defaultHTTP),
 		ctx:    context.Background(),
 		token:  token,
 	}
@@ -117,41 +99,6 @@ func (c *Client) GetRepositoryInfo(owner, repo string) models.RepositoryInfo {
 	if repository.License != nil && repository.License.Name != nil {
 		info.License = *repository.License.Name
 	}
-
-	// --- START FILTERS ---
-	// 1) closed milestones >= 1
-	hasClosed, err := c.HasClosedMilestones(owner, repo)
-	if err != nil {
-		info.Error = fmt.Sprintf("error checking milestones: %v", err)
-		return info
-	}
-	if !hasClosed {
-		info.Error = "repository does not have at least 1 closed milestone"
-		return info
-	}
-
-	// 2) commits >= 100 (stop early if threshold met)
-	commitCount, err := c.getCommitCountWithLimit(owner, repo, 100)
-	if err != nil {
-		info.Error = fmt.Sprintf("error counting commits: %v", err)
-		return info
-	}
-	if commitCount < 100 {
-		info.Error = fmt.Sprintf("repository has fewer than 100 commits (found %d)", commitCount)
-		return info
-	}
-
-	// 3) at least 10 active contributors in last 90 days
-	ok, activeCount, err := c.hasActiveContributors(owner, repo, 90, 10)
-	if err != nil {
-		info.Error = fmt.Sprintf("error checking active contributors: %v", err)
-		return info
-	}
-	if !ok {
-		info.Error = fmt.Sprintf("fewer than 10 active contributors in the last 90 days (found %d)", activeCount)
-		return info
-	}
-	// --- END FILTERS ---
 
 	// if we reach here, filters passed: proceed to fetch contributors and other expensive stuff
 	// Use wait group to fetch commits, milestones, and contributors concurrently
@@ -218,12 +165,13 @@ func (c *Client) GetRepositoryInfo(owner, repo string) models.RepositoryInfo {
 	return info
 }
 
-// HasClosedMilestones returns true if repository has at least one closed milestone.
-func (c *Client) HasClosedMilestones(owner, repo string) (bool, error) {
-	opt := &github.MilestoneListOptions{
+// Returns true if repository has at least one closed milestone.
+func (c *Client) hasClosedMilestones(owner, repo string) (bool, error) {
+	opt := &gith.MilestoneListOptions{
 		State:       "closed",
-		ListOptions: github.ListOptions{PerPage: 1},
+		ListOptions: gith.ListOptions{PerPage: 1},
 	}
+
 	milestones, resp, err := c.client.Issues.ListMilestones(c.ctx, owner, repo, opt)
 	if err != nil {
 		return false, err
@@ -231,18 +179,20 @@ func (c *Client) HasClosedMilestones(owner, repo string) (bool, error) {
 	if len(milestones) > 0 {
 		return true, nil
 	}
+
 	// if API reports more pages, assume there are closed milestones
 	if resp != nil && resp.LastPage > 0 {
 		return true, nil
 	}
+
 	return false, nil
 }
 
 // getCommitCount returns the total number of commits in the repository
 func (c *Client) getCommitCount(owner, repo string) (int, error) {
 	// Use pagination to count all commits
-	opts := &github.CommitsListOptions{
-		ListOptions: github.ListOptions{
+	opts := &gith.CommitsListOptions{
+		ListOptions: gith.ListOptions{
 			PerPage: 100,
 		},
 	}
@@ -267,8 +217,8 @@ func (c *Client) getCommitCount(owner, repo string) (int, error) {
 
 // getCommitCountWithLimit counts commits but stops early when limit is reached.
 func (c *Client) getCommitCountWithLimit(owner, repo string, limit int) (int, error) {
-	opts := &github.CommitsListOptions{
-		ListOptions: github.ListOptions{PerPage: 100},
+	opts := &gith.CommitsListOptions{
+		ListOptions: gith.ListOptions{PerPage: 100},
 	}
 	total := 0
 	for {
@@ -291,9 +241,9 @@ func (c *Client) getCommitCountWithLimit(owner, repo string, limit int) (int, er
 // getMilestoneCount returns the total number of milestones (open + closed)
 func (c *Client) getMilestoneCount(owner, repo string) (int, error) {
 	// Count open milestones
-	openOpts := &github.MilestoneListOptions{
+	openOpts := &gith.MilestoneListOptions{
 		State: "open",
-		ListOptions: github.ListOptions{
+		ListOptions: gith.ListOptions{
 			PerPage: 100,
 		},
 	}
@@ -314,9 +264,9 @@ func (c *Client) getMilestoneCount(owner, repo string) (int, error) {
 	}
 
 	// Count closed milestones
-	closedOpts := &github.MilestoneListOptions{
+	closedOpts := &gith.MilestoneListOptions{
 		State: "closed",
-		ListOptions: github.ListOptions{
+		ListOptions: gith.ListOptions{
 			PerPage: 100,
 		},
 	}
@@ -343,9 +293,9 @@ func (c *Client) getMilestoneCount(owner, repo string) (int, error) {
 // It counts unique commit authors (by Login) in commits since now - days.
 func (c *Client) hasActiveContributors(owner, repo string, days int, minNeeded int) (bool, int, error) {
 	since := time.Now().AddDate(0, 0, -days)
-	opts := &github.CommitsListOptions{
+	opts := &gith.CommitsListOptions{
 		Since:       since,
-		ListOptions: github.ListOptions{PerPage: 100},
+		ListOptions: gith.ListOptions{PerPage: 100},
 	}
 
 	seen := make(map[string]struct{})
@@ -382,8 +332,8 @@ func (c *Client) hasActiveContributors(owner, repo string, days int, minNeeded i
 
 // getContributors returns the list of contributor usernames
 func (c *Client) getContributors(owner, repo string) ([]string, error) {
-	opts := &github.ListContributorsOptions{
-		ListOptions: github.ListOptions{
+	opts := &gith.ListContributorsOptions{
+		ListOptions: gith.ListOptions{
 			PerPage: 100,
 		},
 	}
@@ -413,10 +363,11 @@ func (c *Client) getContributors(owner, repo string) ([]string, error) {
 // CheckRepoEligibility runs the three prechecks the server should apply before heavy fetches:
 //   - at least 1 closed milestone
 //   - at least `minCommits` commits (use 100 where caller passes 100)
-//   - at least `minActive` distinct commit authors in the last `days` days (use 10, 90)
+//   - at least `minActive` distinct commit authors in the last `days` days (use 3, 90)
 func (c *Client) CheckRepoEligibility(owner, repo string, minCommits int, days int, minActive int) (bool, string, error) {
+	// TODO: Execute in parallel way
 	// 1) closed milestones
-	hasClosed, err := c.HasClosedMilestones(owner, repo)
+	hasClosed, err := c.hasClosedMilestones(owner, repo)
 	if err != nil {
 		return false, "", fmt.Errorf("error checking milestones: %w", err)
 	}
