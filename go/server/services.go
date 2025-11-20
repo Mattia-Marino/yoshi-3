@@ -1,11 +1,12 @@
 package server
 
 import (
-	"log"
 	"runtime"
 
 	"github-extractor/github"
 	"github-extractor/models"
+
+	"github.com/sirupsen/logrus"
 )
 
 // Service handles business logic for repository extraction
@@ -13,6 +14,7 @@ type Service struct {
 	ghClient *github.Client
 	jobQueue chan RepositoryRequest
 	workers  int
+	logger   *logrus.Logger
 }
 
 // RepositoryRequest represents a single repository extraction request
@@ -23,18 +25,19 @@ type RepositoryRequest struct {
 }
 
 // NewService creates a new service with a worker pool
-func NewService(ghClient *github.Client) *Service {
+func NewService(ghClient *github.Client, logger *logrus.Logger) *Service {
 	numWorkers := runtime.NumCPU()
 	service := &Service{
 		ghClient: ghClient,
 		jobQueue: make(chan RepositoryRequest, 100), // Buffer for incoming requests
 		workers:  numWorkers,
+		logger:   logger,
 	}
 
 	// Start worker pool
 	service.startWorkers()
 
-	log.Printf("Service initialized with %d workers", numWorkers)
+	logger.Infof("Service initialized with %d workers", numWorkers)
 	return service
 }
 
@@ -48,7 +51,7 @@ func (s *Service) startWorkers() {
 // worker processes repository extraction requests
 func (s *Service) worker(id int) {
 	for req := range s.jobQueue {
-		log.Printf("[Worker %d] Processing %s/%s", id, req.Owner, req.Repo)
+		s.logger.Debugf("[Worker %d] Processing %s/%s", id, req.Owner, req.Repo)
 		info := s.ghClient.GetRepositoryInfo(req.Owner, req.Repo)
 		req.ResultChan <- info
 	}

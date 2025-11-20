@@ -3,13 +3,12 @@ package server
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
-	"os"
 	"runtime"
 
-	"github-extractor/github"
 	"github-extractor/models"
+
+	"github.com/sirupsen/logrus"
 )
 
 // ExtractRequest represents the incoming HTTP request payload
@@ -27,16 +26,24 @@ type ExtractResponse struct {
 // Handler handles HTTP requests for repository extraction
 type Handler struct {
 	service *Service
+	logger  *logrus.Logger
 }
 
 // NewHandler creates a new HTTP handler
-func NewHandler(service *Service) *Handler {
+func NewHandler(service *Service, logger *logrus.Logger) *Handler {
 	return &Handler{
 		service: service,
+		logger:  logger,
 	}
 }
 
 // HealthCheckHandler handles health check requests
+// @Summary Health check
+// @Description Checks if the server is running and returns the number of cores.
+// @Tags health
+// @Produce json
+// @Success 200 {object} map[string]interface{}
+// @Router /health [get]
 func (h *Handler) HealthCheckHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -44,6 +51,17 @@ func (h *Handler) HealthCheckHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // ExtractHandler handles the POST request for extracting repository information
+// @Summary Extract repository information
+// @Description Extracts detailed information about a GitHub repository including commits, milestones, and contributors.
+// @Tags repository
+// @Accept json
+// @Produce json
+// @Param request body ExtractRequest true "Repository extraction request"
+// @Success 200 {object} ExtractResponse
+// @Failure 400 {object} ExtractResponse "Invalid request"
+// @Failure 422 {object} ExtractResponse "Repository not eligible"
+// @Failure 500 {object} ExtractResponse "Internal server error"
+// @Router /extract [post]
 func (h *Handler) ExtractHandler(w http.ResponseWriter, r *http.Request) {
 	// Only accept POST requests
 	if r.Method != http.MethodPost {
@@ -54,31 +72,32 @@ func (h *Handler) ExtractHandler(w http.ResponseWriter, r *http.Request) {
 	// Parse JSON body
 	var req ExtractRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		respondWithError(w, http.StatusBadRequest, fmt.Sprintf("Invalid JSON: %v", err))
+		h.respondWithError(w, http.StatusBadRequest, fmt.Sprintf("Invalid JSON: %v", err))
 		return
 	}
 
 	// Validate required fields
 	if req.Owner == "" {
-		respondWithError(w, http.StatusBadRequest, "owner is required")
+		h.respondWithError(w, http.StatusBadRequest, "owner is required")
 		return
 	}
 	if req.Repo == "" {
-		respondWithError(w, http.StatusBadRequest, "repo is required")
+		h.respondWithError(w, http.StatusBadRequest, "repo is required")
 		return
 	}
 
-	// TODO: Fix code here, token already present and gh client already initalized in main
-	token := os.Getenv("YOSHI_GH_TOKEN")
-	gh := github.NewClient(token)
+	// Use the client from the service
+	gh := h.service.ghClient
 
 	// Run fast eligibility checks first (100 commits, last 90 days, 10 active contributors)
 	ok, reason, err := gh.CheckRepoEligibility(req.Owner, req.Repo, 100, 90, 10)
 	if err != nil {
+		h.logger.Errorf("Error checking eligibility for %s/%s: %v", req.Owner, req.Repo, err)
 		http.Error(w, "internal error checking repository eligibility: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 	if !ok {
+		h.logger.Infof("Repository %s/%s not eligible: %s", req.Owner, req.Repo, reason)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnprocessableEntity) // 422
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": reason})
@@ -90,23 +109,23 @@ func (h *Handler) ExtractHandler(w http.ResponseWriter, r *http.Request) {
 	result := h.service.ProcessRepository(req.Owner, req.Repo)
 
 	// Respond with JSON
-	respondWithJSON(w, http.StatusOK, ExtractResponse{
+	h.respondWithJSON(w, http.StatusOK, ExtractResponse{
 		Repository: result,
 	})
 }
 
 // respondWithJSON writes a JSON response
-func respondWithJSON(w http.ResponseWriter, statusCode int, payload interface{}) {
+func (h *Handler) respondWithJSON(w http.ResponseWriter, statusCode int, payload interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
 	if err := json.NewEncoder(w).Encode(payload); err != nil {
-		log.Printf("Error encoding JSON response: %v", err)
+		h.logger.Errorf("Error encoding JSON response: %v", err)
 	}
 }
 
 // respondWithError writes an error JSON response
-func respondWithError(w http.ResponseWriter, statusCode int, message string) {
-	respondWithJSON(w, statusCode, ExtractResponse{
+func (h *Handler) respondWithError(w http.ResponseWriter, statusCode int, message string) {
+	h.respondWithJSON(w, statusCode, ExtractResponse{
 		Error: message,
 	})
 }

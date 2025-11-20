@@ -1,0 +1,164 @@
+basePath: /
+definitions:
+  models.ContributorDetail:
+    properties:
+      avatar_url:
+        type: string
+      bio:
+        type: string
+      blog:
+        type: string
+      company:
+        type: string
+      created_at:
+        type: string
+      email:
+        type: string
+      error:
+        description: Error holds an error message when retrieval for this user failed
+        type: string
+      followers:
+        type: integer
+      following:
+        type: integer
+      hireable:
+        type: boolean
+      html_url:
+        type: string
+      id:
+        type: integer
+      location:
+        type: string
+      login:
+        type: string
+      name:
+        type: string
+      node_id:
+        type: string
+      public_gists:
+        type: integer
+      public_repos:
+        type: integer
+      site_admin:
+        type: boolean
+      twitter_username:
+        type: string
+      type:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  models.RepositoryInfo:
+    properties:
+      commits:
+        type: integer
+      contributors:
+        items:
+          $ref: '#/definitions/models.ContributorDetail'
+        type: array
+      created_at:
+        type: string
+      default_branch:
+        type: string
+      description:
+        type: string
+      error:
+        type: string
+      forks:
+        type: integer
+      has_issues:
+        type: boolean
+      has_wiki:
+        type: boolean
+      language:
+        type: string
+      license:
+        type: string
+      milestones:
+        type: integer
+      open_issues:
+        type: integer
+      owner:
+        type: string
+      repo:
+        type: string
+      size:
+        type: integer
+      stars:
+        type: integer
+      updated_at:
+        type: string
+      watchers:
+        type: integer
+    type: object
+  server.ExtractRequest:
+    properties:
+      owner:
+        type: string
+      repo:
+        type: string
+    type: object
+  server.ExtractResponse:
+    properties:
+      error:
+        type: string
+      repository:
+        $ref: '#/definitions/models.RepositoryInfo'
+    type: object
+host: localhost:6001
+info:
+  contact: {}
+  description: This is a server to extract detailed information from GitHub repositories.
+  title: GitHub Repository Extractor API
+  version: "1.0"
+paths:
+  /extract:
+    post:
+      consumes:
+      - application/json
+      description: Extracts detailed information about a GitHub repository including
+        commits, milestones, and contributors.
+      parameters:
+      - description: Repository extraction request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/server.ExtractRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/server.ExtractResponse'
+        "400":
+          description: Invalid request
+          schema:
+            $ref: '#/definitions/server.ExtractResponse'
+        "422":
+          description: Repository not eligible
+          schema:
+            $ref: '#/definitions/server.ExtractResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/server.ExtractResponse'
+      summary: Extract repository information
+      tags:
+      - repository
+  /health:
+    get:
+      description: Checks if the server is running and returns the number of cores.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Health check
+      tags:
+      - health
+swagger: "2.0"

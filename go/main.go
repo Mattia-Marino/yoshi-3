@@ -13,6 +13,7 @@ import (
 	"github-extractor/github"
 	"github-extractor/server"
 
+	_ "github-extractor/docs"
 	"github-extractor/logger"
 	"github-extractor/middleware"
 
@@ -21,6 +22,11 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+// @title GitHub Repository Extractor API
+// @version 1.0
+// @description This is a server to extract detailed information from GitHub repositories.
+// @host localhost:6001
+// @BasePath /
 func main() {
 
 	// Initialize logger
@@ -53,13 +59,13 @@ func main() {
 	appLogger.Infof("Using %d CPU cores for parallel processing", numCPU)
 
 	// Create GitHub client
-	ghClient := github.NewClient(cfg.GitHubToken)
+	ghClient := github.NewClient(cfg.GitHubToken, appLogger)
 
 	// Initialize service with worker pool
-	service := server.NewService(ghClient)
+	service := server.NewService(ghClient, appLogger)
 
 	// Initialize handler
-	ghHandler := server.NewHandler(service)
+	ghHandler := server.NewHandler(service, appLogger)
 
 	// Setup routes
 	router := server.SetupRoutes(ghHandler)
@@ -78,6 +84,7 @@ func main() {
 	// Start server in a goroutine
 	go func() {
 		appLogger.WithFields(logrus.Fields{"port": cfg.Port}).Info("Server is running")
+		appLogger.WithField("swagger", "http://localhost:"+cfg.Port+"/swagger/").Info("API docs")
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			appLogger.WithField("error", err).Fatal("Server failed to start")
 		}

@@ -7,7 +7,7 @@ import (
 
 const (
 	TokenEnvVar = "YOSHI_GH_TOKEN" // Environment variable name for GitHub token
-	DefaultPort = "6000"           // Default HTTP server port
+	DefaultPort = "6001"           // Default HTTP server port
 
 	// Logging
 	DefaultLogFile  = "./gh-extractor.log"
