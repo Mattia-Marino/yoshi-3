@@ -1,0 +1,28 @@
+name: "YOSHI-3"
+version: "3.8"
+
+services:
+  go:
+    build:
+      context: ./go
+      args:
+        # forwards build-arg if present; empty otherwise
+        YOSHI_GH_TOKEN: ${YOSHI_GH_TOKEN:-}
+    image: yoshi-go
+    container_name: YOSHI-3-go
+    ports:
+      - "6001:6001"
+    environment:
+      - YOSHI_GH_TOKEN=${YOSHI_GH_TOKEN}
+    depends_on:
+      - python
+
+  python:
+    build:
+      context: ./python
+    image: yoshi-py
+    container_name: YOSHI-3-python
+    ports:
+      - "5000:5000"
+    environment:
+      - PORT=5000
