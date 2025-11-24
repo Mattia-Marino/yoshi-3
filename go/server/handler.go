@@ -89,8 +89,8 @@ func (h *Handler) ExtractHandler(w http.ResponseWriter, r *http.Request) {
 	// Use the client from the service
 	gh := h.service.ghClient
 
-	// Run fast eligibility checks first (100 commits, last 90 days, 10 active contributors)
-	ok, reason, err := gh.CheckRepoEligibility(req.Owner, req.Repo, 100, 90, 10)
+	// Run fast eligibility checks first (100 commits, last 90 days, 3 active contributors)
+	ok, reason, err := gh.CheckRepoEligibility(req.Owner, req.Repo, 100, 90, 3)
 	if err != nil {
 		h.logger.Errorf("Error checking eligibility for %s/%s: %v", req.Owner, req.Repo, err)
 		http.Error(w, "internal error checking repository eligibility: "+err.Error(), http.StatusInternalServerError)
