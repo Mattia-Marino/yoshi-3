@@ -10,9 +10,8 @@ import time
 import hello_pb2
 import hello_pb2_grpc
 
-
+"""Implementation of the Greeter service."""
 class GreeterServicer(hello_pb2_grpc.GreeterServicer):
-    """Implementation of the Greeter service."""
     
     def SayHello(self, request, context):
         """Handles the SayHello RPC call."""
@@ -21,9 +20,8 @@ class GreeterServicer(hello_pb2_grpc.GreeterServicer):
         print(f"Received request from: {name}")
         return hello_pb2.HelloReply(message=message)
 
-
+"""Start the gRPC server."""
 def serve():
-    """Start the gRPC server."""
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
     hello_pb2_grpc.add_GreeterServicer_to_server(GreeterServicer(), server)
     
