@@ -134,6 +134,7 @@ func (c *Client) GetRepositoryInfo(owner, repo string) models.RepositoryInfo {
 	var commitErr, milestoneErr, contributorErr, locErr error
 	var commits, milestones, loc int
 	var contributors []string
+	var totalContributors, nonAnonContributors int
 
 	wg.Add(4)
 
@@ -152,7 +153,7 @@ func (c *Client) GetRepositoryInfo(owner, repo string) models.RepositoryInfo {
 	// Get contributors
 	go func() {
 		defer wg.Done()
-		contributors, contributorErr = c.getContributors(owner, repo)
+		contributors, totalContributors, nonAnonContributors, contributorErr = c.getContributors(owner, repo)
 	}()
 
 	// Get LOC estimate
@@ -188,6 +189,9 @@ func (c *Client) GetRepositoryInfo(owner, repo string) models.RepositoryInfo {
 			info.Error = fmt.Sprintf("Failed to fetch contributors: %v", contributorErr)
 		}
 	} else {
+		info.TotalContributorsCount = totalContributors
+		info.NonAnonymousContributorsCount = nonAnonContributors
+
 		// convert usernames into detailed contributor profiles
 		details, detErr := c.getContributorsDetails(contributors)
 		if detErr != nil {
@@ -196,13 +200,19 @@ func (c *Client) GetRepositoryInfo(owner, repo string) models.RepositoryInfo {
 			}
 			// Even if detailed fetch failed, return repository with empty contributors
 			info.Contributors = nil
+			info.ContributorsWithLocationCount = 0
 		} else {
-			info.Contributors = details
+			// Filter contributors with location
+			var withLocation []models.ContributorDetail
+			for _, d := range details {
+				if d.Location != "" {
+					withLocation = append(withLocation, d)
+				}
+			}
+			info.Contributors = withLocation
+			info.ContributorsWithLocationCount = len(withLocation)
 		}
 	}
-
-	// set contributor count even if details failed
-	info.ContributorCount = len(contributors)
 
 	// set LOC if fetched
 	if locErr != nil {
@@ -361,24 +371,31 @@ func (c *Client) hasActiveContributors(owner, repo string, days int, minNeeded i
 	return len(seen) >= minNeeded, len(seen), nil
 }
 
-// getContributors returns the list of contributor usernames
-func (c *Client) getContributors(owner, repo string) ([]string, error) {
+// getContributors returns the list of contributor usernames, total count (including anon), and non-anon count
+func (c *Client) getContributors(owner, repo string) ([]string, int, int, error) {
 	opts := &gith.ListContributorsOptions{
+		Anon: "true",
 		ListOptions: gith.ListOptions{
 			PerPage: 100,
 		},
 	}
 
 	var allContributors []string
+	var totalCount int
+	var nonAnonCount int
+
 	for {
 		contributors, resp, err := c.client.Repositories.ListContributors(c.ctx, owner, repo, opts)
 		if err != nil {
-			return nil, err
+			return nil, 0, 0, err
 		}
+
+		totalCount += len(contributors)
 
 		for _, contributor := range contributors {
 			if contributor.Login != nil {
 				allContributors = append(allContributors, *contributor.Login)
+				nonAnonCount++
 			}
 		}
 
@@ -388,7 +405,7 @@ func (c *Client) getContributors(owner, repo string) ([]string, error) {
 		opts.Page = resp.NextPage
 	}
 
-	return allContributors, nil
+	return allContributors, totalCount, nonAnonCount, nil
 }
 
 // getContributorsDetails fetches detailed information for a list of contributors
@@ -399,7 +416,7 @@ func (c *Client) getContributorsDetails(usernames []string) ([]models.Contributo
 
 	var wg sync.WaitGroup
 	results := make([]models.ContributorDetail, len(usernames))
-	sem := make(chan struct{}, 8) // Limit concurrency
+	sem := make(chan struct{}, 5)
 
 	for i, username := range usernames {
 		wg.Add(1)
@@ -410,6 +427,7 @@ func (c *Client) getContributorsDetails(usernames []string) ([]models.Contributo
 
 			user, _, err := c.client.Users.Get(c.ctx, u)
 			if err != nil {
+				c.logger.Debugf("Failed to fetch user %s: %v", u, err)
 				results[idx].Error = err.Error()
 				return
 			}
@@ -433,9 +451,6 @@ func (c *Client) getContributorsDetails(usernames []string) ([]models.Contributo
 			if user.Type != nil {
 				detail.Type = *user.Type
 			}
-			if user.SiteAdmin != nil {
-				detail.SiteAdmin = *user.SiteAdmin
-			}
 			if user.Name != nil {
 				detail.Name = *user.Name
 			}
@@ -451,26 +466,8 @@ func (c *Client) getContributorsDetails(usernames []string) ([]models.Contributo
 			if user.Email != nil {
 				detail.Email = *user.Email
 			}
-			if user.Hireable != nil {
-				detail.Hireable = *user.Hireable
-			}
 			if user.Bio != nil {
 				detail.Bio = *user.Bio
-			}
-			if user.TwitterUsername != nil {
-				detail.Twitter = *user.TwitterUsername
-			}
-			if user.PublicRepos != nil {
-				detail.PublicRepos = *user.PublicRepos
-			}
-			if user.PublicGists != nil {
-				detail.PublicGists = *user.PublicGists
-			}
-			if user.Followers != nil {
-				detail.Followers = *user.Followers
-			}
-			if user.Following != nil {
-				detail.Following = *user.Following
 			}
 			if user.CreatedAt != nil {
 				detail.CreatedAt = user.CreatedAt.Time
@@ -486,14 +483,19 @@ func (c *Client) getContributorsDetails(usernames []string) ([]models.Contributo
 
 	// Check if all failed
 	allFailed := true
+	var firstErr string
 	for _, r := range results {
 		if r.Error == "" {
 			allFailed = false
 			break
 		}
+		if firstErr == "" {
+			firstErr = r.Error
+		}
 	}
+
 	if allFailed && len(usernames) > 0 {
-		return results, fmt.Errorf("all contributor detail requests failed")
+		return results, fmt.Errorf("all contributor detail requests failed. First error: %s", firstErr)
 	}
 
 	return results, nil
@@ -745,7 +747,7 @@ func countSignificantLines(content, path string) int {
 	// but it's better than counting everything.
 	// To handle strings correctly, we would need a full parser.
 	// Here we try to match strings OR comments, and if it's a comment we remove it.
-	
+
 	switch ext {
 	case ".c", ".cpp", ".h", ".hpp", ".java", ".js", ".ts", ".cs", ".go", ".rs", ".swift", ".kt", ".scala", ".php", ".css":
 		// Match C-style comments: //... or /* ... */
@@ -780,7 +782,7 @@ func countSignificantLines(content, path string) int {
 	// Replace comments with empty string (or keep strings)
 	stripped := re.ReplaceAllStringFunc(content, func(match string) string {
 		if strings.HasPrefix(match, "//") || strings.HasPrefix(match, "/*") || strings.HasPrefix(match, "#") || strings.HasPrefix(match, "<!--") {
-			// It's a comment, replace with newlines to preserve line count? 
+			// It's a comment, replace with newlines to preserve line count?
 			// No, we want to remove it. But if we remove it, we might merge lines.
 			// Actually, if we remove a block comment, we should probably replace it with spaces or nothing.
 			// If we remove a line comment, we remove to the end of line.
@@ -796,7 +798,7 @@ func countSignificantLines(content, path string) int {
 			// Usually LoC counts logical lines or physical lines.
 			// If we just strip comments, we are left with code.
 			// Then we count non-empty lines.
-			return "" 
+			return ""
 		}
 		// It's a string, keep it
 		return match
@@ -817,8 +819,8 @@ func countSignificantLines(content, path string) int {
 // isSourceFile checks if the file path has a source code extension
 func isSourceFile(path string) bool {
 	exts := []string{
-		".go", ".py", ".js", ".ts", ".java", ".c", ".cpp", ".h", ".hpp", ".cs", 
-		".rb", ".php", ".html", ".css", ".json", ".xml", ".yaml", ".yml", ".md", 
+		".go", ".py", ".js", ".ts", ".java", ".c", ".cpp", ".h", ".hpp", ".cs",
+		".rb", ".php", ".html", ".css", ".json", ".xml", ".yaml", ".yml", ".md",
 		".txt", ".sh", ".bat", ".rs", ".swift", ".kt", ".scala", ".pl", ".pm",
 	}
 	for _, ext := range exts {
