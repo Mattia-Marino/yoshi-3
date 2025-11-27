@@ -17,12 +17,6 @@ definitions:
       error:
         description: Error holds an error message when retrieval for this user failed
         type: string
-      followers:
-        type: integer
-      following:
-        type: integer
-      hireable:
-        type: boolean
       html_url:
         type: string
       id:
@@ -34,14 +28,6 @@ definitions:
       name:
         type: string
       node_id:
-        type: string
-      public_gists:
-        type: integer
-      public_repos:
-        type: integer
-      site_admin:
-        type: boolean
-      twitter_username:
         type: string
       type:
         type: string
@@ -56,6 +42,8 @@ definitions:
         items:
           $ref: '#/definitions/models.ContributorDetail'
         type: array
+      contributors_with_location_count:
+        type: integer
       created_at:
         type: string
       default_branch:
@@ -74,7 +62,11 @@ definitions:
         type: string
       license:
         type: string
+      loc:
+        type: integer
       milestones:
+        type: integer
+      non_anonymous_contributors_count:
         type: integer
       open_issues:
         type: integer
@@ -85,6 +77,8 @@ definitions:
       size:
         type: integer
       stars:
+        type: integer
+      total_contributors_count:
         type: integer
       updated_at:
         type: string
@@ -104,6 +98,13 @@ definitions:
         type: string
       repository:
         $ref: '#/definitions/models.RepositoryInfo'
+    type: object
+  server.ExtractResponseLimits:
+    properties:
+      error:
+        type: string
+      remaining:
+        type: integer
     type: object
 host: localhost:6001
 info:
@@ -161,4 +162,21 @@ paths:
       summary: Health check
       tags:
       - health
+  /remaining:
+    get:
+      description: Gives the number of the remaining GitHub API requests available
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/server.ExtractResponseLimits'
+        "400":
+          description: Invalid request
+          schema:
+            $ref: '#/definitions/server.ExtractResponse'
+      summary: Get remaining requests
+      tags:
+      - remaining
 swagger: "2.0"

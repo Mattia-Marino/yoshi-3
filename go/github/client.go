@@ -227,6 +227,81 @@ func (c *Client) GetRepositoryInfo(owner, repo string) models.RepositoryInfo {
 	return info
 }
 
+// CheckRepoEligibility runs the three prechecks the server should apply before heavy fetches:
+//   - at least 1 closed milestone
+//   - at least `minCommits` commits (use 100 where caller passes 100)
+//   - at least `minActive` distinct commit authors in the last `days` days (use 3, 90)
+func (c *Client) CheckRepoEligibility(owner, repo string, minCommits int, days int, minActive int) (bool, string, error) {
+	var wg sync.WaitGroup
+	wg.Add(3)
+
+	var (
+		milestoneErr, commitErr, activeErr error
+		// hasClosed                          bool
+		commitCount int
+		activeOk    bool
+		activeCount int
+	)
+
+	// 1) closed milestones
+	go func() {
+		defer wg.Done()
+		// hasClosed, milestoneErr = c.hasClosedMilestones(owner, repo)
+		_, milestoneErr = c.hasClosedMilestones(owner, repo)
+	}()
+
+	// 2) commits >= minCommits
+	go func() {
+		defer wg.Done()
+		commitCount, commitErr = c.getCommitCountWithLimit(owner, repo, minCommits)
+	}()
+
+	// 3) active contributors
+	go func() {
+		defer wg.Done()
+		activeOk, activeCount, activeErr = c.hasActiveContributors(owner, repo, days, minActive)
+	}()
+
+	wg.Wait()
+
+	if milestoneErr != nil {
+		return false, "", fmt.Errorf("error checking milestones: %w", milestoneErr)
+	}
+	// if !hasClosed {
+	// 	return false, "repository does not have at least 1 closed milestone", nil
+	// }
+
+	if commitErr != nil {
+		return false, "", fmt.Errorf("error counting commits: %w", commitErr)
+	}
+	if commitCount < minCommits {
+		return false, fmt.Sprintf("repository has fewer than %d commits (found %d)", minCommits, commitCount), nil
+	}
+
+	if activeErr != nil {
+		return false, "", fmt.Errorf("error checking active contributors: %w", activeErr)
+	}
+	if !activeOk {
+		return false, fmt.Sprintf("fewer than %d active contributors in the last %d days (found %d)", minActive, days, activeCount), nil
+	}
+
+	return true, "", nil
+}
+
+// GetRemainingRequests fetches the remaining number of requests for the REST API (Core).
+// This is useful for monitoring usage against the 5,000 hourly limit.
+// Note: This API call itself does not consume quota.
+func (c *Client) GetRemainingRequests() (int, error) {
+	limits, _, err := c.client.RateLimits(c.ctx)
+	if err != nil {
+		return 0, err
+	}
+	if limits.Core != nil {
+		return limits.Core.Remaining, nil
+	}
+	return 0, fmt.Errorf("could not retrieve core rate limits")
+}
+
 // Returns true if repository has at least one closed milestone.
 func (c *Client) hasClosedMilestones(owner, repo string) (bool, error) {
 	opt := &gith.MilestoneListOptions{
@@ -499,67 +574,6 @@ func (c *Client) getContributorsDetails(usernames []string) ([]models.Contributo
 	}
 
 	return results, nil
-}
-
-// CheckRepoEligibility runs the three prechecks the server should apply before heavy fetches:
-//   - at least 1 closed milestone
-//   - at least `minCommits` commits (use 100 where caller passes 100)
-//   - at least `minActive` distinct commit authors in the last `days` days (use 3, 90)
-func (c *Client) CheckRepoEligibility(owner, repo string, minCommits int, days int, minActive int) (bool, string, error) {
-	var wg sync.WaitGroup
-	wg.Add(3)
-
-	var (
-		milestoneErr, commitErr, activeErr error
-		// hasClosed                          bool
-		commitCount int
-		activeOk    bool
-		activeCount int
-	)
-
-	// 1) closed milestones
-	go func() {
-		defer wg.Done()
-		// hasClosed, milestoneErr = c.hasClosedMilestones(owner, repo)
-		_, milestoneErr = c.hasClosedMilestones(owner, repo)
-	}()
-
-	// 2) commits >= minCommits
-	go func() {
-		defer wg.Done()
-		commitCount, commitErr = c.getCommitCountWithLimit(owner, repo, minCommits)
-	}()
-
-	// 3) active contributors
-	go func() {
-		defer wg.Done()
-		activeOk, activeCount, activeErr = c.hasActiveContributors(owner, repo, days, minActive)
-	}()
-
-	wg.Wait()
-
-	if milestoneErr != nil {
-		return false, "", fmt.Errorf("error checking milestones: %w", milestoneErr)
-	}
-	// if !hasClosed {
-	// 	return false, "repository does not have at least 1 closed milestone", nil
-	// }
-
-	if commitErr != nil {
-		return false, "", fmt.Errorf("error counting commits: %w", commitErr)
-	}
-	if commitCount < minCommits {
-		return false, fmt.Sprintf("repository has fewer than %d commits (found %d)", minCommits, commitCount), nil
-	}
-
-	if activeErr != nil {
-		return false, "", fmt.Errorf("error checking active contributors: %w", activeErr)
-	}
-	if !activeOk {
-		return false, fmt.Sprintf("fewer than %d active contributors in the last %d days (found %d)", minActive, days, activeCount), nil
-	}
-
-	return true, "", nil
 }
 
 // getLOC attempts to estimate Lines Of Code by summing blob sizes from the repository tree

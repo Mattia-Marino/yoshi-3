@@ -9,6 +9,7 @@ func SetupRoutes(handler *Handler) *mux.Router {
 	r := mux.NewRouter()
 
 	r.HandleFunc("/health", handler.HealthCheckHandler).Methods("GET")
+	r.HandleFunc("/remaining", handler.GetRemainingRequestsHandler).Methods("GET")
 	r.HandleFunc("/extract", handler.ExtractHandler).Methods("POST")
 
 	// Swagger

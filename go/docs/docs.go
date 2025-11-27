@@ -87,6 +87,32 @@ const docTemplate = `{
                     }
                 }
             }
+        },
+        "/remaining": {
+            "get": {
+                "description": "Gives the number of the remaining GitHub API requests available",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "remaining"
+                ],
+                "summary": "Get remaining requests",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/server.ExtractResponseLimits"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request",
+                        "schema": {
+                            "$ref": "#/definitions/server.ExtractResponse"
+                        }
+                    }
+                }
+            }
         }
     },
     "definitions": {
@@ -115,15 +141,6 @@ const docTemplate = `{
                     "description": "Error holds an error message when retrieval for this user failed",
                     "type": "string"
                 },
-                "followers": {
-                    "type": "integer"
-                },
-                "following": {
-                    "type": "integer"
-                },
-                "hireable": {
-                    "type": "boolean"
-                },
                 "html_url": {
                     "type": "string"
                 },
@@ -140,18 +157,6 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "node_id": {
-                    "type": "string"
-                },
-                "public_gists": {
-                    "type": "integer"
-                },
-                "public_repos": {
-                    "type": "integer"
-                },
-                "site_admin": {
-                    "type": "boolean"
-                },
-                "twitter_username": {
                     "type": "string"
                 },
                 "type": {
@@ -173,6 +178,9 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/models.ContributorDetail"
                     }
+                },
+                "contributors_with_location_count": {
+                    "type": "integer"
                 },
                 "created_at": {
                     "type": "string"
@@ -201,7 +209,13 @@ const docTemplate = `{
                 "license": {
                     "type": "string"
                 },
+                "loc": {
+                    "type": "integer"
+                },
                 "milestones": {
+                    "type": "integer"
+                },
+                "non_anonymous_contributors_count": {
                     "type": "integer"
                 },
                 "open_issues": {
@@ -217,6 +231,9 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "stars": {
+                    "type": "integer"
+                },
+                "total_contributors_count": {
                     "type": "integer"
                 },
                 "updated_at": {
@@ -246,6 +263,17 @@ const docTemplate = `{
                 },
                 "repository": {
                     "$ref": "#/definitions/models.RepositoryInfo"
+                }
+            }
+        },
+        "server.ExtractResponseLimits": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "type": "string"
+                },
+                "remaining": {
+                    "type": "integer"
                 }
             }
         }
