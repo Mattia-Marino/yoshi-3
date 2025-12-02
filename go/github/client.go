@@ -1,14 +1,11 @@
 package github
 
 import (
-	"bufio"
 	"context"
-	"encoding/base64"
 	"fmt"
+	"math"
 	"net"
 	"net/http"
-	"regexp"
-	"strings"
 	"sync"
 	"time"
 
@@ -129,11 +126,12 @@ func (c *Client) GetRepositoryInfo(owner, repo string) models.RepositoryInfo {
 		info.License = *repository.License.Name
 	}
 
-	// if we reach here, filters passed: proceed to fetch contributors, commits, milestones and LOC concurrently
+	// Proceed to fetch contributors, commits and milestones concurrently
 	var wg sync.WaitGroup
-	var commitErr, milestoneErr, contributorErr, locErr error
-	var commits, milestones, loc int
+	var commitErr, milestoneErr, contributorErr, recentContributorErr error
+	var commits, milestones int
 	var contributors []string
+	var recentContributors []string
 	var totalContributors, nonAnonContributors int
 
 	wg.Add(4)
@@ -156,15 +154,10 @@ func (c *Client) GetRepositoryInfo(owner, repo string) models.RepositoryInfo {
 		contributors, totalContributors, nonAnonContributors, contributorErr = c.getContributors(owner, repo)
 	}()
 
-	// Get LOC estimate
+	// Get recent contributors (last 90 days)
 	go func() {
 		defer wg.Done()
-		// Use repository default branch as starting point if available
-		branch := ""
-		if repository.DefaultBranch != nil {
-			branch = *repository.DefaultBranch
-		}
-		loc, locErr = c.getLOC(owner, repo, branch)
+		recentContributors, recentContributorErr = c.getRecentContributors(owner, repo, 90)
 	}()
 
 	wg.Wait()
@@ -192,8 +185,38 @@ func (c *Client) GetRepositoryInfo(owner, repo string) models.RepositoryInfo {
 		info.TotalContributorsCount = totalContributors
 		info.NonAnonymousContributorsCount = nonAnonContributors
 
+		// Filter contributors: top sqrt(total) + recent (90 days)
+		targetContributorsSet := make(map[string]struct{})
+
+		// 1. Top sqrt(total)
+		limit := int(math.Ceil(math.Sqrt(float64(totalContributors))))
+		if limit > len(contributors) {
+			limit = len(contributors)
+		}
+		for i := 0; i < limit; i++ {
+			targetContributorsSet[contributors[i]] = struct{}{}
+		}
+
+		// 2. Recent contributors
+		if recentContributorErr != nil {
+			if info.Error == "" {
+				info.Error = fmt.Sprintf("Failed to fetch recent contributors: %v", recentContributorErr)
+			}
+		} else {
+			for _, u := range recentContributors {
+				targetContributorsSet[u] = struct{}{}
+			}
+		}
+
+		var targetContributors []string
+		for u := range targetContributorsSet {
+			targetContributors = append(targetContributors, u)
+		}
+
+		info.SelectedContributorsCount = len(targetContributors)
+
 		// convert usernames into detailed contributor profiles
-		details, detErr := c.getContributorsDetails(contributors)
+		details, detErr := c.getContributorsDetails(targetContributors)
 		if detErr != nil {
 			if info.Error == "" {
 				info.Error = fmt.Sprintf("Failed to fetch contributor details: %v", detErr)
@@ -212,16 +235,6 @@ func (c *Client) GetRepositoryInfo(owner, repo string) models.RepositoryInfo {
 			info.Contributors = withLocation
 			info.ContributorsWithLocationCount = len(withLocation)
 		}
-	}
-
-	// set LOC if fetched
-	if locErr != nil {
-		// don't overwrite primary error, but if none set a readable note
-		if info.Error == "" {
-			info.Error = fmt.Sprintf("Failed to estimate LOC: %v", locErr)
-		}
-	} else {
-		info.Loc = loc
 	}
 
 	return info
@@ -446,6 +459,41 @@ func (c *Client) hasActiveContributors(owner, repo string, days int, minNeeded i
 	return len(seen) >= minNeeded, len(seen), nil
 }
 
+// getRecentContributors returns a list of contributors who have committed in the last `days` days.
+func (c *Client) getRecentContributors(owner, repo string, days int) ([]string, error) {
+	since := time.Now().AddDate(0, 0, -days)
+	opts := &gith.CommitsListOptions{
+		Since:       since,
+		ListOptions: gith.ListOptions{PerPage: 100},
+	}
+
+	seen := make(map[string]struct{})
+	var recent []string
+
+	for {
+		commits, resp, err := c.client.Repositories.ListCommits(c.ctx, owner, repo, opts)
+		if err != nil {
+			return nil, err
+		}
+
+		for _, cm := range commits {
+			if cm.Author != nil && cm.Author.Login != nil {
+				login := *cm.Author.Login
+				if _, ok := seen[login]; !ok {
+					seen[login] = struct{}{}
+					recent = append(recent, login)
+				}
+			}
+		}
+
+		if resp.NextPage == 0 {
+			break
+		}
+		opts.Page = resp.NextPage
+	}
+	return recent, nil
+}
+
 // getContributors returns the list of contributor usernames, total count (including anon), and non-anon count
 func (c *Client) getContributors(owner, repo string) ([]string, int, int, error) {
 	opts := &gith.ListContributorsOptions{
@@ -574,273 +622,4 @@ func (c *Client) getContributorsDetails(usernames []string) ([]models.Contributo
 	}
 
 	return results, nil
-}
-
-// getLOC attempts to estimate Lines Of Code by summing blob sizes from the repository tree
-// and dividing by an average bytes-per-line constant. It falls back to using the
-// repository `Size` field (KB) when tree info is not available.
-func (c *Client) getLOC(owner, repo, branch string) (int, error) {
-	// If no branch provided, try to fetch repository default branch
-	if branch == "" {
-		repository, _, err := c.client.Repositories.Get(c.ctx, owner, repo)
-		if err != nil {
-			return 0, err
-		}
-		if repository.DefaultBranch != nil {
-			branch = *repository.DefaultBranch
-		}
-	}
-
-	if branch == "" {
-		return 0, fmt.Errorf("no branch available to compute LOC")
-	}
-
-	// Get branch information to obtain a tree/commit SHA
-	br, _, err := c.client.Repositories.GetBranch(c.ctx, owner, repo, branch, 0)
-	if err != nil {
-		// fallback: try to use repository size
-		repository, _, err2 := c.client.Repositories.Get(c.ctx, owner, repo)
-		if err2 != nil {
-			return 0, fmt.Errorf("failed to get branch and repository: %v, %v", err, err2)
-		}
-		// repository.Size is in KB; estimate bytes then convert to LOC
-		bytes := 0
-		if repository.Size != nil {
-			bytes = (*repository.Size) * 1024
-		}
-		if bytes == 0 {
-			return 0, fmt.Errorf("no size information available to estimate LOC")
-		}
-		return bytes / 50, nil
-	}
-
-	var sha string
-	if br.Commit != nil {
-		if br.Commit.Commit != nil && br.Commit.Commit.Tree != nil && br.Commit.Commit.Tree.SHA != nil {
-			sha = *br.Commit.Commit.Tree.SHA
-		} else if br.Commit.SHA != nil {
-			sha = *br.Commit.SHA
-		}
-	}
-
-	if sha == "" {
-		// fallback to repository size
-		repository, _, err := c.client.Repositories.Get(c.ctx, owner, repo)
-		if err != nil {
-			return 0, err
-		}
-		bytes := 0
-		if repository.Size != nil {
-			bytes = (*repository.Size) * 1024
-		}
-		if bytes == 0 {
-			return 0, fmt.Errorf("no size information available to estimate LOC")
-		}
-		return bytes / 50, nil
-	}
-
-	// Get tree recursively
-	tree, _, err := c.client.Git.GetTree(c.ctx, owner, repo, sha, true)
-	if err != nil {
-		// fallback to repository size
-		repository, _, err2 := c.client.Repositories.Get(c.ctx, owner, repo)
-		if err2 != nil {
-			return 0, fmt.Errorf("failed to get tree and repository: %v, %v", err, err2)
-		}
-		bytes := 0
-		if repository.Size != nil {
-			bytes = (*repository.Size) * 1024
-		}
-		if bytes == 0 {
-			return 0, fmt.Errorf("failed to get tree and no size information available: %v", err)
-		}
-		return bytes / 50, nil
-	}
-
-	// Count lines by fetching blobs for text files
-	// This is expensive, so we limit concurrency and file size
-	var wg sync.WaitGroup
-	var totalLines int64
-	var mu sync.Mutex
-	sem := make(chan struct{}, 20) // Limit concurrency to 20
-
-	if tree != nil && tree.Entries != nil {
-		for _, e := range tree.Entries {
-			if e != nil && e.Type != nil && *e.Type == "blob" && e.Path != nil && isSourceFile(*e.Path) {
-				// Skip large files to avoid timeouts/memory issues (e.g. > 1MB)
-				if e.Size != nil && *e.Size > 1024*1024 {
-					continue
-				}
-
-				wg.Add(1)
-				sem <- struct{}{}
-				go func(sha string) {
-					defer wg.Done()
-					defer func() { <-sem }()
-
-					blob, _, err := c.client.Git.GetBlob(c.ctx, owner, repo, sha)
-					if err != nil {
-						// Ignore errors for individual files
-						return
-					}
-
-					if blob != nil && blob.Content != nil {
-						content := *blob.Content
-						if blob.Encoding != nil && *blob.Encoding == "base64" {
-							decoded, err := base64.StdEncoding.DecodeString(content)
-							if err == nil {
-								content = string(decoded)
-							}
-						}
-
-						// Count lines excluding comments and blank lines
-						c := countSignificantLines(content, *e.Path)
-
-						mu.Lock()
-						totalLines += int64(c)
-						mu.Unlock()
-					}
-				}(*e.SHA)
-			}
-		}
-	}
-	wg.Wait()
-
-	// If we found lines, return them.
-	if totalLines > 0 {
-		return int(totalLines), nil
-	}
-
-	// Fallback if no lines found (e.g. no source files or all failed)
-	// Use the previous estimation method as a backup
-	totalBytes := 0
-	if tree != nil && tree.Entries != nil {
-		for _, e := range tree.Entries {
-			if e != nil && e.Size != nil && e.Path != nil {
-				if isSourceFile(*e.Path) {
-					totalBytes += *e.Size
-				}
-			}
-		}
-	}
-
-	// If tree returns no sizes (possible for some entries), fallback to repository size
-	if totalBytes == 0 {
-		repository, _, err := c.client.Repositories.Get(c.ctx, owner, repo)
-		if err != nil {
-			return 0, err
-		}
-		if repository.Size != nil {
-			totalBytes = (*repository.Size) * 1024
-		}
-	}
-
-	if totalBytes == 0 {
-		return 0, fmt.Errorf("could not determine repository byte size to estimate LOC")
-	}
-
-	// Estimate average bytes per source line. 50 bytes/line is a reasonable heuristic.
-	return totalBytes / 50, nil
-}
-
-// countSignificantLines counts lines excluding comments and blank lines
-func countSignificantLines(content, path string) int {
-	// Normalize newlines
-	content = strings.ReplaceAll(content, "\r\n", "\n")
-	content = strings.ReplaceAll(content, "\r", "\n")
-
-	// Determine comment style
-	ext := ""
-	if idx := strings.LastIndex(path, "."); idx != -1 {
-		ext = strings.ToLower(path[idx:])
-	}
-
-	var re *regexp.Regexp
-	// Regex to match comments. We replace them with empty strings.
-	// Note: This is a heuristic and might not be perfect for all edge cases (e.g. strings containing comment markers)
-	// but it's better than counting everything.
-	// To handle strings correctly, we would need a full parser.
-	// Here we try to match strings OR comments, and if it's a comment we remove it.
-
-	switch ext {
-	case ".c", ".cpp", ".h", ".hpp", ".java", ".js", ".ts", ".cs", ".go", ".rs", ".swift", ".kt", ".scala", ".php", ".css":
-		// Match C-style comments: //... or /* ... */
-		// Also match strings to avoid removing comments inside strings: "..." or '...'
-		// We use a capturing group for strings so we can keep them.
-		// Go regex doesn't support lookarounds or conditional replacement easily in one go without a callback.
-		// We will use ReplaceAllStringFunc.
-		// Note: We use [\s\S] for block comments to match newlines, but avoid (?s) globally
-		// so that // comments don't match newlines.
-		re = regexp.MustCompile(`"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|//[^\n]*|/\*[\s\S]*?\*/`)
-	case ".py", ".rb", ".sh", ".pl", ".pm", ".yaml", ".yml", ".dockerfile":
-		// Hash style: #...
-		// Also match strings: "..." or '...' or """...""" or '''...''' (Python)
-		// Python docstrings are tricky. Let's just handle simple strings and # comments.
-		re = regexp.MustCompile(`(?m)(?:"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|#.*$)`)
-	case ".html", ".xml":
-		// HTML style: <!-- ... -->
-		re = regexp.MustCompile(`"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|<!--[\s\S]*?-->`)
-	default:
-		// Default: just count non-empty lines
-		scanner := bufio.NewScanner(strings.NewReader(content))
-		count := 0
-		for scanner.Scan() {
-			line := strings.TrimSpace(scanner.Text())
-			if line != "" {
-				count++
-			}
-		}
-		return count
-	}
-
-	// Replace comments with empty string (or keep strings)
-	stripped := re.ReplaceAllStringFunc(content, func(match string) string {
-		if strings.HasPrefix(match, "//") || strings.HasPrefix(match, "/*") || strings.HasPrefix(match, "#") || strings.HasPrefix(match, "<!--") {
-			// It's a comment, replace with newlines to preserve line count?
-			// No, we want to remove it. But if we remove it, we might merge lines.
-			// Actually, if we remove a block comment, we should probably replace it with spaces or nothing.
-			// If we remove a line comment, we remove to the end of line.
-			// The goal is to count *lines of code*.
-			// If a line becomes empty after removing comments, it shouldn't count.
-			// So replacing with empty string is fine.
-			// BUT, for block comments spanning multiple lines, we remove the content.
-			// Example:
-			// code /* comment
-			// comment */ code
-			// -> code  code
-			// This remains 1 line? Or 2?
-			// Usually LoC counts logical lines or physical lines.
-			// If we just strip comments, we are left with code.
-			// Then we count non-empty lines.
-			return ""
-		}
-		// It's a string, keep it
-		return match
-	})
-
-	// Now count non-empty lines
-	scanner := bufio.NewScanner(strings.NewReader(stripped))
-	count := 0
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line != "" {
-			count++
-		}
-	}
-	return count
-}
-
-// isSourceFile checks if the file path has a source code extension
-func isSourceFile(path string) bool {
-	exts := []string{
-		".go", ".py", ".js", ".ts", ".java", ".c", ".cpp", ".h", ".hpp", ".cs",
-		".rb", ".php", ".html", ".css", ".json", ".xml", ".yaml", ".yml", ".md",
-		".txt", ".sh", ".bat", ".rs", ".swift", ".kt", ".scala", ".pl", ".pm",
-	}
-	for _, ext := range exts {
-		if len(path) > len(ext) && path[len(path)-len(ext):] == ext {
-			return true
-		}
-	}
-	return false
 }

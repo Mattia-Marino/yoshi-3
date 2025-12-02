@@ -9,7 +9,6 @@ type RepositoryInfo struct {
 	Owner                         string              `json:"owner"`
 	Repo                          string              `json:"repo"`
 	Description                   string              `json:"description"`
-	Loc                           int                 `json:"loc"`
 	Stars                         int                 `json:"stars"`
 	Forks                         int                 `json:"forks"`
 	OpenIssues                    int                 `json:"open_issues"`
@@ -21,6 +20,7 @@ type RepositoryInfo struct {
 	Contributors                  []ContributorDetail `json:"contributors"`
 	TotalContributorsCount        int                 `json:"total_contributors_count"`
 	NonAnonymousContributorsCount int                 `json:"non_anonymous_contributors_count"`
+	SelectedContributorsCount     int                 `json:"selected_contributors_count"`
 	ContributorsWithLocationCount int                 `json:"contributors_with_location_count"`
 	Size                          int                 `json:"size"`
 	Watchers                      int                 `json:"watchers"`
