@@ -23,6 +23,6 @@ services:
     image: yoshi-py
     container_name: YOSHI-3-python
     ports:
-      - "5000:5000"
+      - "50051:50051"
     environment:
-      - PORT=5000
+      - PYTHONUNBUFFERED=1
