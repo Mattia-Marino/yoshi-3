@@ -23,6 +23,12 @@ type ExtractResponse struct {
 	Error      string                `json:"error,omitempty"`
 }
 
+// ExtractResponseLimits represents the response containing rate limits information
+type ExtractResponseLimits struct {
+	Remaining int    `json:"remaining"`
+	Error     string `json:"error,omitempty"`
+}
+
 // Handler handles HTTP requests for repository extraction
 type Handler struct {
 	service *Service
@@ -48,6 +54,27 @@ func (h *Handler) HealthCheckHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	fmt.Fprintf(w, `{"status":"ok","cores":%d}`, runtime.NumCPU())
+}
+
+// GetRemainingRequestsHandler handles the count of the remaining requests available
+// @Summary Get remaining requests
+// @Description Gives the number of the remaining GitHub API requests available
+// @Tags remaining
+// @Produce json
+// @Success 200 {object} ExtractResponseLimits
+// @Failure 400 {object} ExtractResponse "Invalid request"
+// @Router /remaining [get]
+func (h *Handler) GetRemainingRequestsHandler(w http.ResponseWriter, r *http.Request) {
+	gh := h.service.ghClient
+	rate, err := gh.GetRemainingRequests()
+
+	if err != nil {
+		h.respondWithError(w, http.StatusBadRequest, "Invalid request")
+	}
+
+	h.respondWithJSON(w, http.StatusOK, ExtractResponseLimits{
+		Remaining: rate,
+	})
 }
 
 // ExtractHandler handles the POST request for extracting repository information
@@ -89,8 +116,8 @@ func (h *Handler) ExtractHandler(w http.ResponseWriter, r *http.Request) {
 	// Use the client from the service
 	gh := h.service.ghClient
 
-	// Run fast eligibility checks first (100 commits, last 90 days, 10 active contributors)
-	ok, reason, err := gh.CheckRepoEligibility(req.Owner, req.Repo, 100, 90, 10)
+	// Run fast eligibility checks first (100 commits, last 90 days, 3 active contributors)
+	ok, reason, err := gh.CheckRepoEligibility(req.Owner, req.Repo, 100, 90, 3)
 	if err != nil {
 		h.logger.Errorf("Error checking eligibility for %s/%s: %v", req.Owner, req.Repo, err)
 		http.Error(w, "internal error checking repository eligibility: "+err.Error(), http.StatusInternalServerError)

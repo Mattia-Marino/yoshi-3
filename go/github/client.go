@@ -3,6 +3,7 @@ package github
 import (
 	"context"
 	"fmt"
+	"math"
 	"net"
 	"net/http"
 	"sync"
@@ -22,6 +23,20 @@ type Client struct {
 	logger *logrus.Logger
 }
 
+type authTransport struct {
+	transport http.RoundTripper
+	token     string
+}
+
+func (t *authTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if t.token != "" {
+		// Clone the request to avoid modifying the original
+		req = req.Clone(req.Context())
+		req.Header.Set("Authorization", "Bearer "+t.token)
+	}
+	return t.transport.RoundTrip(req)
+}
+
 // NewClient creates a new GitHub API client
 func NewClient(token string, logger *logrus.Logger) *Client {
 	baseTransport := &http.Transport{
@@ -34,10 +49,18 @@ func NewClient(token string, logger *logrus.Logger) *Client {
 		MaxIdleConnsPerHost:   20,
 	}
 
+	var transport http.RoundTripper = baseTransport
+	if token != "" {
+		transport = &authTransport{
+			transport: baseTransport,
+			token:     token,
+		}
+	}
+
 	// Default http client
 	defaultHTTP := &http.Client{
 		Timeout:   120 * time.Second,
-		Transport: baseTransport,
+		Transport: transport,
 	}
 
 	return &Client{
@@ -103,14 +126,15 @@ func (c *Client) GetRepositoryInfo(owner, repo string) models.RepositoryInfo {
 		info.License = *repository.License.Name
 	}
 
-	// if we reach here, filters passed: proceed to fetch contributors and other expensive stuff
-	// Use wait group to fetch commits, milestones, and contributors concurrently
+	// Proceed to fetch contributors, commits and milestones concurrently
 	var wg sync.WaitGroup
-	var commitErr, milestoneErr, contributorErr error
+	var commitErr, milestoneErr, contributorErr, recentContributorErr error
 	var commits, milestones int
 	var contributors []string
+	var recentContributors []string
+	var totalContributors, nonAnonContributors int
 
-	wg.Add(3)
+	wg.Add(4)
 
 	// Get number of commits
 	go func() {
@@ -127,7 +151,13 @@ func (c *Client) GetRepositoryInfo(owner, repo string) models.RepositoryInfo {
 	// Get contributors
 	go func() {
 		defer wg.Done()
-		contributors, contributorErr = c.getContributors(owner, repo)
+		contributors, totalContributors, nonAnonContributors, contributorErr = c.getContributors(owner, repo)
+	}()
+
+	// Get recent contributors (last 90 days)
+	go func() {
+		defer wg.Done()
+		recentContributors, recentContributorErr = c.getRecentContributors(owner, repo, 90)
 	}()
 
 	wg.Wait()
@@ -152,20 +182,137 @@ func (c *Client) GetRepositoryInfo(owner, repo string) models.RepositoryInfo {
 			info.Error = fmt.Sprintf("Failed to fetch contributors: %v", contributorErr)
 		}
 	} else {
+		info.TotalContributorsCount = totalContributors
+		info.NonAnonymousContributorsCount = nonAnonContributors
+
+		// Filter contributors: top sqrt(total) + recent (90 days)
+		targetContributorsSet := make(map[string]struct{})
+
+		// 1. Top sqrt(total)
+		limit := int(math.Ceil(math.Sqrt(float64(totalContributors))))
+		if limit > len(contributors) {
+			limit = len(contributors)
+		}
+		for i := 0; i < limit; i++ {
+			targetContributorsSet[contributors[i]] = struct{}{}
+		}
+
+		// 2. Recent contributors
+		if recentContributorErr != nil {
+			if info.Error == "" {
+				info.Error = fmt.Sprintf("Failed to fetch recent contributors: %v", recentContributorErr)
+			}
+		} else {
+			for _, u := range recentContributors {
+				targetContributorsSet[u] = struct{}{}
+			}
+		}
+
+		var targetContributors []string
+		for u := range targetContributorsSet {
+			targetContributors = append(targetContributors, u)
+		}
+
+		info.SelectedContributorsCount = len(targetContributors)
+
 		// convert usernames into detailed contributor profiles
-		details, detErr := c.getContributorsDetails(contributors)
+		details, detErr := c.getContributorsDetails(targetContributors)
 		if detErr != nil {
 			if info.Error == "" {
 				info.Error = fmt.Sprintf("Failed to fetch contributor details: %v", detErr)
 			}
 			// Even if detailed fetch failed, return repository with empty contributors
 			info.Contributors = nil
+			info.ContributorsWithLocationCount = 0
 		} else {
-			info.Contributors = details
+			// Filter contributors with location
+			var withLocation []models.ContributorDetail
+			for _, d := range details {
+				if d.Location != "" {
+					withLocation = append(withLocation, d)
+				}
+			}
+			info.Contributors = withLocation
+			info.ContributorsWithLocationCount = len(withLocation)
 		}
 	}
 
 	return info
+}
+
+// CheckRepoEligibility runs the three prechecks the server should apply before heavy fetches:
+//   - at least 1 closed milestone
+//   - at least `minCommits` commits (use 100 where caller passes 100)
+//   - at least `minActive` distinct commit authors in the last `days` days (use 3, 90)
+func (c *Client) CheckRepoEligibility(owner, repo string, minCommits int, days int, minActive int) (bool, string, error) {
+	var wg sync.WaitGroup
+	wg.Add(3)
+
+	var (
+		milestoneErr, commitErr, activeErr error
+		// hasClosed                          bool
+		commitCount int
+		activeOk    bool
+		activeCount int
+	)
+
+	// 1) closed milestones
+	go func() {
+		defer wg.Done()
+		// hasClosed, milestoneErr = c.hasClosedMilestones(owner, repo)
+		_, milestoneErr = c.hasClosedMilestones(owner, repo)
+	}()
+
+	// 2) commits >= minCommits
+	go func() {
+		defer wg.Done()
+		commitCount, commitErr = c.getCommitCountWithLimit(owner, repo, minCommits)
+	}()
+
+	// 3) active contributors
+	go func() {
+		defer wg.Done()
+		activeOk, activeCount, activeErr = c.hasActiveContributors(owner, repo, days, minActive)
+	}()
+
+	wg.Wait()
+
+	if milestoneErr != nil {
+		return false, "", fmt.Errorf("error checking milestones: %w", milestoneErr)
+	}
+	// if !hasClosed {
+	// 	return false, "repository does not have at least 1 closed milestone", nil
+	// }
+
+	if commitErr != nil {
+		return false, "", fmt.Errorf("error counting commits: %w", commitErr)
+	}
+	if commitCount < minCommits {
+		return false, fmt.Sprintf("repository has fewer than %d commits (found %d)", minCommits, commitCount), nil
+	}
+
+	if activeErr != nil {
+		return false, "", fmt.Errorf("error checking active contributors: %w", activeErr)
+	}
+	if !activeOk {
+		return false, fmt.Sprintf("fewer than %d active contributors in the last %d days (found %d)", minActive, days, activeCount), nil
+	}
+
+	return true, "", nil
+}
+
+// GetRemainingRequests fetches the remaining number of requests for the REST API (Core).
+// This is useful for monitoring usage against the 5,000 hourly limit.
+// Note: This API call itself does not consume quota.
+func (c *Client) GetRemainingRequests() (int, error) {
+	limits, _, err := c.client.RateLimits(c.ctx)
+	if err != nil {
+		return 0, err
+	}
+	if limits.Core != nil {
+		return limits.Core.Remaining, nil
+	}
+	return 0, fmt.Errorf("could not retrieve core rate limits")
 }
 
 // Returns true if repository has at least one closed milestone.
@@ -312,24 +459,66 @@ func (c *Client) hasActiveContributors(owner, repo string, days int, minNeeded i
 	return len(seen) >= minNeeded, len(seen), nil
 }
 
-// getContributors returns the list of contributor usernames
-func (c *Client) getContributors(owner, repo string) ([]string, error) {
+// getRecentContributors returns a list of contributors who have committed in the last `days` days.
+func (c *Client) getRecentContributors(owner, repo string, days int) ([]string, error) {
+	since := time.Now().AddDate(0, 0, -days)
+	opts := &gith.CommitsListOptions{
+		Since:       since,
+		ListOptions: gith.ListOptions{PerPage: 100},
+	}
+
+	seen := make(map[string]struct{})
+	var recent []string
+
+	for {
+		commits, resp, err := c.client.Repositories.ListCommits(c.ctx, owner, repo, opts)
+		if err != nil {
+			return nil, err
+		}
+
+		for _, cm := range commits {
+			if cm.Author != nil && cm.Author.Login != nil {
+				login := *cm.Author.Login
+				if _, ok := seen[login]; !ok {
+					seen[login] = struct{}{}
+					recent = append(recent, login)
+				}
+			}
+		}
+
+		if resp.NextPage == 0 {
+			break
+		}
+		opts.Page = resp.NextPage
+	}
+	return recent, nil
+}
+
+// getContributors returns the list of contributor usernames, total count (including anon), and non-anon count
+func (c *Client) getContributors(owner, repo string) ([]string, int, int, error) {
 	opts := &gith.ListContributorsOptions{
+		Anon: "true",
 		ListOptions: gith.ListOptions{
 			PerPage: 100,
 		},
 	}
 
 	var allContributors []string
+	var totalCount int
+	var nonAnonCount int
+
 	for {
 		contributors, resp, err := c.client.Repositories.ListContributors(c.ctx, owner, repo, opts)
 		if err != nil {
-			return nil, err
+			return nil, 0, 0, err
 		}
+
+		totalCount += len(contributors)
 
 		for _, contributor := range contributors {
 			if contributor.Login != nil {
 				allContributors = append(allContributors, *contributor.Login)
+				nonAnonCount++
 			}
 		}
 
@@ -339,7 +528,7 @@ func (c *Client) getContributors(owner, repo string) ([]string, error) {
 		opts.Page = resp.NextPage
 	}
 
-	return allContributors, nil
+	return allContributors, totalCount, nonAnonCount, nil
 }
 
 // getContributorsDetails fetches detailed information for a list of contributors
@@ -350,7 +539,7 @@ func (c *Client) getContributorsDetails(usernames []string) ([]models.Contributo
 
 	var wg sync.WaitGroup
 	results := make([]models.ContributorDetail, len(usernames))
-	sem := make(chan struct{}, 8) // Limit concurrency
+	sem := make(chan struct{}, 5)
 
 	for i, username := range usernames {
 		wg.Add(1)
@@ -361,6 +550,7 @@ func (c *Client) getContributorsDetails(usernames []string) ([]models.Contributo
 
 			user, _, err := c.client.Users.Get(c.ctx, u)
 			if err != nil {
+				c.logger.Debugf("Failed to fetch user %s: %v", u, err)
 				results[idx].Error = err.Error()
 				return
 			}
@@ -384,9 +574,6 @@ func (c *Client) getContributorsDetails(usernames []string) ([]models.Contributo
 			if user.Type != nil {
 				detail.Type = *user.Type
 			}
-			if user.SiteAdmin != nil {
-				detail.SiteAdmin = *user.SiteAdmin
-			}
 			if user.Name != nil {
 				detail.Name = *user.Name
 			}
@@ -402,26 +589,8 @@ func (c *Client) getContributorsDetails(usernames []string) ([]models.Contributo
 			if user.Email != nil {
 				detail.Email = *user.Email
 			}
-			if user.Hireable != nil {
-				detail.Hireable = *user.Hireable
-			}
 			if user.Bio != nil {
 				detail.Bio = *user.Bio
-			}
-			if user.TwitterUsername != nil {
-				detail.Twitter = *user.TwitterUsername
-			}
-			if user.PublicRepos != nil {
-				detail.PublicRepos = *user.PublicRepos
-			}
-			if user.PublicGists != nil {
-				detail.PublicGists = *user.PublicGists
-			}
-			if user.Followers != nil {
-				detail.Followers = *user.Followers
-			}
-			if user.Following != nil {
-				detail.Following = *user.Following
 			}
 			if user.CreatedAt != nil {
 				detail.CreatedAt = user.CreatedAt.Time
@@ -437,75 +606,20 @@ func (c *Client) getContributorsDetails(usernames []string) ([]models.Contributo
 
 	// Check if all failed
 	allFailed := true
+	var firstErr string
 	for _, r := range results {
 		if r.Error == "" {
 			allFailed = false
 			break
 		}
+		if firstErr == "" {
+			firstErr = r.Error
+		}
 	}
+
 	if allFailed && len(usernames) > 0 {
-		return results, fmt.Errorf("all contributor detail requests failed")
+		return results, fmt.Errorf("all contributor detail requests failed. First error: %s", firstErr)
 	}
 
 	return results, nil
-}
-
-// CheckRepoEligibility runs the three prechecks the server should apply before heavy fetches:
-//   - at least 1 closed milestone
-//   - at least `minCommits` commits (use 100 where caller passes 100)
-//   - at least `minActive` distinct commit authors in the last `days` days (use 3, 90)
-func (c *Client) CheckRepoEligibility(owner, repo string, minCommits int, days int, minActive int) (bool, string, error) {
-	var wg sync.WaitGroup
-	wg.Add(3)
-
-	var (
-		milestoneErr, commitErr, activeErr error
-		hasClosed                          bool
-		commitCount                        int
-		activeOk                           bool
-		activeCount                        int
-	)
-
-	// 1) closed milestones
-	go func() {
-		defer wg.Done()
-		hasClosed, milestoneErr = c.hasClosedMilestones(owner, repo)
-	}()
-
-	// 2) commits >= minCommits
-	go func() {
-		defer wg.Done()
-		commitCount, commitErr = c.getCommitCountWithLimit(owner, repo, minCommits)
-	}()
-
-	// 3) active contributors
-	go func() {
-		defer wg.Done()
-		activeOk, activeCount, activeErr = c.hasActiveContributors(owner, repo, days, minActive)
-	}()
-
-	wg.Wait()
-
-	if milestoneErr != nil {
-		return false, "", fmt.Errorf("error checking milestones: %w", milestoneErr)
-	}
-	if !hasClosed {
-		return false, "repository does not have at least 1 closed milestone", nil
-	}
-
-	if commitErr != nil {
-		return false, "", fmt.Errorf("error counting commits: %w", commitErr)
-	}
-	if commitCount < minCommits {
-		return false, fmt.Sprintf("repository has fewer than %d commits (found %d)", minCommits, commitCount), nil
-	}
-
-	if activeErr != nil {
-		return false, "", fmt.Errorf("error checking active contributors: %w", activeErr)
-	}
-	if !activeOk {
-		return false, fmt.Sprintf("fewer than %d active contributors in the last %d days (found %d)", minActive, days, activeCount), nil
-	}
-
-	return true, "", nil
 }

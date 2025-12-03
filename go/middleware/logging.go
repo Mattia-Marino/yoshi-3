@@ -50,29 +50,29 @@ func LoggingMiddleware(logger *logrus.Logger) func(http.Handler) http.Handler {
 			// Include the raw query and parsed query params so callers can see
 			// request-specific parameters (e.g. ?email=...)
 			logger.WithFields(logrus.Fields{
-				"method":       r.Method,
-				"path":         r.URL.Path,
-				"request_uri":  r.RequestURI,
-				"raw_query":    r.URL.RawQuery,
+				"method": r.Method,
+				"path":   r.URL.Path,
+				// "request_uri": r.RequestURI,
+				// "raw_query":    r.URL.RawQuery,
 				"query_params": r.URL.Query(),
 				"remote":       r.RemoteAddr,
 				"user_agent":   r.UserAgent(),
-				"headers":      r.Header,
+				// "headers":      r.Header,
 			}).Info("request started")
 
 			next.ServeHTTP(rw, r)
 
 			latency := time.Since(start)
 			logger.WithFields(logrus.Fields{
-				"method":       r.Method,
-				"path":         r.URL.Path,
-				"request_uri":  r.RequestURI,
-				"raw_query":    r.URL.RawQuery,
+				"method": r.Method,
+				"path":   r.URL.Path,
+				// "request_uri": r.RequestURI,
+				// "raw_query":    r.URL.RawQuery,
 				"query_params": r.URL.Query(),
 				"status":       rw.status,
 				"bytes":        rw.bytes,
 				"durationMs":   latency.Milliseconds(),
-				"headers":      r.Header,
+				// "headers":      r.Header,
 			}).Info("request completed")
 		})
 	}
