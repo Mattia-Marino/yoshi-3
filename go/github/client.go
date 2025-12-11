@@ -126,6 +126,33 @@ func (c *Client) GetRepositoryInfo(owner, repo string) models.RepositoryInfo {
 		info.License = *repository.License.Name
 	}
 
+	// Set derived booleans
+	info.HasDescription = info.Description != ""
+	info.HasLicense = info.License != ""
+	info.HasWikiPage = info.HasWiki
+
+	// Check for community health metrics
+	metrics, _, err := c.client.Repositories.GetCommunityHealthMetrics(c.ctx, owner, repo)
+	if err == nil && metrics.Files != nil {
+		info.HasCodeOfConduct = metrics.Files.CodeOfConduct != nil
+		info.HasContributingGuidelines = metrics.Files.Contributing != nil
+		info.HasIssuesTemplate = metrics.Files.IssueTemplate != nil
+		info.HasPullRequestTemplate = metrics.Files.PullRequestTemplate != nil
+		info.HasReadme = metrics.Files.Readme != nil
+	}
+
+	// Check for Security Policy (simple check for SECURITY.md)
+	// Note: This is a basic check. GitHub also supports .github/SECURITY.md
+	_, _, _, err = c.client.Repositories.GetContents(c.ctx, owner, repo, "SECURITY.md", nil)
+	if err == nil {
+		info.HasSecurityPolicy = true
+	} else {
+		_, _, _, err = c.client.Repositories.GetContents(c.ctx, owner, repo, ".github/SECURITY.md", nil)
+		if err == nil {
+			info.HasSecurityPolicy = true
+		}
+	}
+
 	// Proceed to fetch contributors, commits and milestones concurrently
 	var wg sync.WaitGroup
 	var commitErr, milestoneErr, contributorErr, recentContributorErr error
@@ -175,6 +202,7 @@ func (c *Client) GetRepositoryInfo(owner, repo string) models.RepositoryInfo {
 		}
 	} else {
 		info.Milestones = milestones
+		info.HasMilestones = milestones > 0
 	}
 
 	if contributorErr != nil {
