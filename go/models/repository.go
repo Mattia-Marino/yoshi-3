@@ -26,6 +26,16 @@ type RepositoryInfo struct {
 	Watchers                      int                 `json:"watchers"`
 	HasIssues                     bool                `json:"has_issues"`
 	HasWiki                       bool                `json:"has_wiki"`
+	HasCodeOfConduct              bool                `json:"has_code_of_conduct"`
+	HasReadme                     bool                `json:"has_readme"`
+	HasDescription                bool                `json:"has_description"`
+	HasContributingGuidelines     bool                `json:"has_contributing_guidelines"`
+	HasLicense                    bool                `json:"has_license"`
+	HasSecurityPolicy             bool                `json:"has_security_policy"`
+	HasIssuesTemplate             bool                `json:"has_issues_template"`
+	HasPullRequestTemplate        bool                `json:"has_pull_request_template"`
+	HasWikiPage                   bool                `json:"has_wiki_page"`
+	HasMilestones                 bool                `json:"has_milestones"`
 	DefaultBranch                 string              `json:"default_branch"`
 	License                       string              `json:"license"`
 	Error                         string              `json:"error,omitempty"`

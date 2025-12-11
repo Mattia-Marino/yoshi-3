@@ -197,10 +197,40 @@ const docTemplate = `{
                 "forks": {
                     "type": "integer"
                 },
+                "has_code_of_conduct": {
+                    "type": "boolean"
+                },
+                "has_contributing_guidelines": {
+                    "type": "boolean"
+                },
+                "has_description": {
+                    "type": "boolean"
+                },
                 "has_issues": {
                     "type": "boolean"
                 },
+                "has_issues_template": {
+                    "type": "boolean"
+                },
+                "has_license": {
+                    "type": "boolean"
+                },
+                "has_milestones": {
+                    "type": "boolean"
+                },
+                "has_pull_request_template": {
+                    "type": "boolean"
+                },
+                "has_readme": {
+                    "type": "boolean"
+                },
+                "has_security_policy": {
+                    "type": "boolean"
+                },
                 "has_wiki": {
+                    "type": "boolean"
+                },
+                "has_wiki_page": {
                     "type": "boolean"
                 },
                 "language": {
@@ -208,9 +238,6 @@ const docTemplate = `{
                 },
                 "license": {
                     "type": "string"
-                },
-                "loc": {
-                    "type": "integer"
                 },
                 "milestones": {
                     "type": "integer"
@@ -226,6 +253,9 @@ const docTemplate = `{
                 },
                 "repo": {
                     "type": "string"
+                },
+                "selected_contributors_count": {
+                    "type": "integer"
                 },
                 "size": {
                     "type": "integer"
