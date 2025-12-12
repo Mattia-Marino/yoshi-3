@@ -50,60 +50,52 @@ class ProcessorServicer(processor_pb2_grpc.ProcessorServiceServicer):
         Process repository data and compute formality metric.
         
         Args:
-            request: ProcessRequest containing repository JSON data
+            request: ProcessRequest containing repository data
             context: gRPC context
             
         Returns:
-            ProcessResponse: JSON string with computed formality metric
+            ProcessResponse: Formality score
         """
         try:
             logger.info("Process request received")
-            logger.debug(f"Request type: {type(request)}")
-            logger.debug(f"Request fields: {request.DESCRIPTOR.fields}")
             
-            # Log raw input for debugging
-            raw_json = request.repository_json
-            logger.info(f"Received JSON length: {len(raw_json)} characters")
-            logger.debug(f"First 200 chars: {raw_json[:200]}")
+            # Extract repository data from proto message
+            repo = request.repository
+            logger.info(f"Repository: {repo.owner}/{repo.repo}")
             
-            if not raw_json or raw_json.strip() == "":
-                logger.error("Received empty JSON string")
-                context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
-                context.set_details("Empty JSON input received")
-                return processor_pb2.ProcessResponse(result_json="{}")
-            
-            # Parse input JSON
-            repo_data = json.loads(raw_json)
-            logger.info(f"Successfully parsed JSON with keys: {list(repo_data.keys())}")
+            # Convert proto message to dictionary for formality calculator
+            repo_data = {
+                "repository": {
+                    "owner": repo.owner,
+                    "repo": repo.repo,
+                    "description": repo.description,
+                    "has_code_of_conduct": repo.has_code_of_conduct,
+                    "has_readme": repo.has_readme,
+                    "has_description": repo.has_description,
+                    "has_contributing_guidelines": repo.has_contributing_guidelines,
+                    "has_license": repo.has_license,
+                    "has_security_policy": repo.has_security_policy,
+                    "has_issues_template": repo.has_issues_template,
+                    "has_pull_request_template": repo.has_pull_request_template,
+                    "has_wiki_page": repo.has_wiki_page,
+                    "has_milestones": repo.has_milestones,
+                }
+            }
             
             # Compute formality metric
             formality_score = FormalityCalculator.compute(repo_data)
             logger.info(f"Computed formality score: {formality_score}")
             
-            # Prepare result JSON
-            result = {
-                "formality": formality_score
-            }
-            
-            result_json = json.dumps(result)
-            logger.info(f"Returning result: {result_json}")
-            
+            # Return direct response
             return processor_pb2.ProcessResponse(
-                result_json=result_json
+                formality=formality_score
             )
-            
-        except json.JSONDecodeError as e:
-            logger.error(f"JSON decode error: {str(e)}")
-            logger.error(f"Problematic input: {request.repository_json[:500]}")
-            context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
-            context.set_details(f"Invalid JSON input: {str(e)}")
-            return processor_pb2.ProcessResponse(result_json="{}")
             
         except Exception as e:
             logger.error(f"Processing error: {str(e)}", exc_info=True)
             context.set_code(grpc.StatusCode.INTERNAL)
             context.set_details(f"Processing error: {str(e)}")
-            return processor_pb2.ProcessResponse(result_json="{}")
+            return processor_pb2.ProcessResponse(formality=0.0)
 
 
 def serve():

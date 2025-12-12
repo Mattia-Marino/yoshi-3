@@ -20,12 +20,47 @@ message HealthResponse {
     string message = 2;
 }
 
-// Process request containing repository JSON data
+// Repository data for processing
+message Repository {
+    string owner = 1;
+    string repo = 2;
+    string description = 3;
+    int32 stars = 4;
+    int32 forks = 5;
+    int32 open_issues = 6;
+    string language = 7;
+    string created_at = 8;
+    string updated_at = 9;
+    int32 commits = 10;
+    int32 milestones = 11;
+    int32 total_contributors_count = 12;
+    int32 non_anonymous_contributors_count = 13;
+    int32 selected_contributors_count = 14;
+    int32 contributors_with_location_count = 15;
+    int32 size = 16;
+    int32 watchers = 17;
+    bool has_issues = 18;
+    bool has_wiki = 19;
+    bool has_code_of_conduct = 20;
+    bool has_readme = 21;
+    bool has_description = 22;
+    bool has_contributing_guidelines = 23;
+    bool has_license = 24;
+    bool has_security_policy = 25;
+    bool has_issues_template = 26;
+    bool has_pull_request_template = 27;
+    bool has_wiki_page = 28;
+    bool has_milestones = 29;
+    string default_branch = 30;
+    string license = 31;
+}
+
+// Process request containing repository data
 message ProcessRequest {
-    string repository_json = 1;  // JSON string containing repository data
+    Repository repository = 1;
 }
 
 // Process response containing computed metrics
 message ProcessResponse {
-    string result_json = 1;  // JSON string with computed metrics
+    double formality = 1;
 }

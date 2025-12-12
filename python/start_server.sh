@@ -39,7 +39,6 @@ else
     if pgrep -f "python app.py" > /dev/null; then
         echo -e "${GREEN}✓ Server started successfully (PID: $(pgrep -f 'python app.py'))${NC}"
         echo -e "${BLUE}Logs: tail -f server.log${NC}"
-        echo -e "${BLUE}Test: python test_client.py${NC}"
         echo -e "${BLUE}Stop: ./stop_server.sh${NC}"
     else
         echo -e "${RED}✗ Failed to start server${NC}"
