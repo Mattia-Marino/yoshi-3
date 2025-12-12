@@ -1,0 +1,31 @@
+syntax = "proto3";
+
+package processor;
+
+// Processing service for GitHub repository metrics
+service ProcessorService {
+    // Health check endpoint
+    rpc Health(HealthRequest) returns (HealthResponse);
+    
+    // Process repository data and compute metrics
+    rpc Process(ProcessRequest) returns (ProcessResponse);
+}
+
+// Health check request (empty)
+message HealthRequest {}
+
+// Health check response
+message HealthResponse {
+    string status = 1;
+    string message = 2;
+}
+
+// Process request containing repository JSON data
+message ProcessRequest {
+    string repository_json = 1;  // JSON string containing repository data
+}
+
+// Process response containing computed metrics
+message ProcessResponse {
+    string result_json = 1;  // JSON string with computed metrics
+}
