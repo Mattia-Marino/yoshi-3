@@ -20,6 +20,24 @@ message HealthResponse {
     string message = 2;
 }
 
+// Contributor data
+message Contributor {
+    string login = 1;
+    int32 id = 2;
+    string node_id = 3;
+    string avatar_url = 4;
+    string html_url = 5;
+    string type = 6;
+    string name = 7;
+    string company = 8;
+    string blog = 9;
+    string location = 10;
+    string email = 11;
+    string bio = 12;
+    string created_at = 13;
+    string updated_at = 14;
+}
+
 // Repository data for processing
 message Repository {
     string owner = 1;
@@ -53,6 +71,7 @@ message Repository {
     bool has_milestones = 29;
     string default_branch = 30;
     string license = 31;
+    repeated Contributor contributors = 32;
 }
 
 // Process request containing repository data
@@ -63,4 +82,5 @@ message ProcessRequest {
 // Process response containing computed metrics
 message ProcessResponse {
     double formality = 1;
+    double geodispersion = 2;
 }

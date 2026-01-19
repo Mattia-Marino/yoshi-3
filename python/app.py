@@ -11,19 +11,16 @@ import sys
 import os
 import json
 import logging
+import argparse
 
 # Add generated directory to Python path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'generated'))
 
 import processor_pb2
 import processor_pb2_grpc
-from formality_calculator import FormalityCalculator
+from calculators import FormalityCalculator, GeodispersionCalculator
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+# Logger will be configured in main
 logger = logging.getLogger(__name__)
 
 
@@ -47,14 +44,14 @@ class ProcessorServicer(processor_pb2_grpc.ProcessorServiceServicer):
     
     def Process(self, request, context):
         """
-        Process repository data and compute formality metric.
+        Process repository data and compute metrics.
         
         Args:
             request: ProcessRequest containing repository data
             context: gRPC context
             
         Returns:
-            ProcessResponse: Formality score
+            ProcessResponse: Formality and geodispersion scores
         """
         try:
             logger.info("Process request received")
@@ -63,7 +60,27 @@ class ProcessorServicer(processor_pb2_grpc.ProcessorServiceServicer):
             repo = request.repository
             logger.info(f"Repository: {repo.owner}/{repo.repo}")
             
-            # Convert proto message to dictionary for formality calculator
+            # Convert contributors from proto to dict list
+            contributors_data = []
+            for contributor in repo.contributors:
+                contributors_data.append({
+                    "login": contributor.login,
+                    "id": contributor.id,
+                    "node_id": contributor.node_id,
+                    "avatar_url": contributor.avatar_url,
+                    "html_url": contributor.html_url,
+                    "type": contributor.type,
+                    "name": contributor.name,
+                    "company": contributor.company,
+                    "blog": contributor.blog,
+                    "location": contributor.location,
+                    "email": contributor.email,
+                    "bio": contributor.bio,
+                    "created_at": contributor.created_at,
+                    "updated_at": contributor.updated_at,
+                })
+            
+            # Convert proto message to dictionary for calculators
             repo_data = {
                 "repository": {
                     "owner": repo.owner,
@@ -79,6 +96,7 @@ class ProcessorServicer(processor_pb2_grpc.ProcessorServiceServicer):
                     "has_pull_request_template": repo.has_pull_request_template,
                     "has_wiki_page": repo.has_wiki_page,
                     "has_milestones": repo.has_milestones,
+                    "contributors": contributors_data,
                 }
             }
             
@@ -86,23 +104,38 @@ class ProcessorServicer(processor_pb2_grpc.ProcessorServiceServicer):
             formality_score = FormalityCalculator.compute(repo_data)
             logger.info(f"Computed formality score: {formality_score}")
             
-            # Return direct response
+            # Compute geodispersion metric
+            geodispersion_score = GeodispersionCalculator.compute(repo_data)
+            logger.info(f"Computed geodispersion score: {geodispersion_score}")
+            
+            # Return response with both metrics
             return processor_pb2.ProcessResponse(
-                formality=formality_score
+                formality=formality_score,
+                geodispersion=geodispersion_score
             )
             
         except Exception as e:
             logger.error(f"Processing error: {str(e)}", exc_info=True)
             context.set_code(grpc.StatusCode.INTERNAL)
             context.set_details(f"Processing error: {str(e)}")
-            return processor_pb2.ProcessResponse(formality=0.0)
+            return processor_pb2.ProcessResponse(formality=0.0, geodispersion=0.0)
 
 
-def serve():
+def serve(log_level=logging.INFO):
     """
     Start the gRPC server and listen for incoming requests.
+    
+    Args:
+        log_level: Logging level (logging.INFO, logging.DEBUG, etc.)
     """
+    # Configure logging
+    logging.basicConfig(
+        level=log_level,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
+    
     logger.info("Starting gRPC Processing Server...")
+    logger.debug(f"Logging level set to: {logging.getLevelName(log_level)}")
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
     processor_pb2_grpc.add_ProcessorServiceServicer_to_server(
         ProcessorServicer(), server
@@ -114,4 +147,18 @@ def serve():
 
 
 if __name__ == '__main__':
-    serve()
+    # Parse command-line arguments
+    parser = argparse.ArgumentParser(description='gRPC Processing Server for GitHub Repository Metrics')
+    parser.add_argument(
+        '--log-level',
+        type=str,
+        default='INFO',
+        choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
+        help='Set the logging level (default: INFO)'
+    )
+    args = parser.parse_args()
+    
+    # Convert string log level to logging constant
+    log_level = getattr(logging, args.log_level.upper())
+    
+    serve(log_level)
