@@ -20,6 +20,21 @@ message HealthResponse {
     string message = 2;
 }
 
+// Commit data
+message Commit {
+    string sha = 1;
+    string author_email = 2;
+    string author_name = 3;
+    string date = 4;
+}
+
+// Pull Request data
+message PullRequest {
+    int32 number = 1;
+    string status = 2;
+    string merged_at = 3;
+}
+
 // Contributor data
 message Contributor {
     string login = 1;
@@ -72,6 +87,8 @@ message Repository {
     string default_branch = 30;
     string license = 31;
     repeated Contributor contributors = 32;
+    repeated Commit commits_list = 33;
+    repeated PullRequest pull_requests = 34;
 }
 
 // Process request containing repository data
@@ -83,4 +100,5 @@ message ProcessRequest {
 message ProcessResponse {
     double formality = 1;
     double geodispersion = 2;
+    double longevity = 3;
 }

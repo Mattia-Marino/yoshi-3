@@ -18,7 +18,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'generated'))
 
 import processor_pb2
 import processor_pb2_grpc
-from calculators import FormalityCalculator, GeodispersionCalculator
+from calculators import FormalityCalculator, GeodispersionCalculator, LongevityCalculator
 
 # Logger will be configured in main
 logger = logging.getLogger(__name__)
@@ -80,6 +80,25 @@ class ProcessorServicer(processor_pb2_grpc.ProcessorServiceServicer):
                     "updated_at": contributor.updated_at,
                 })
             
+            # Convert commits from proto to dict list
+            commits_data = []
+            for commit in repo.commits_list:
+                commits_data.append({
+                    "sha": commit.sha,
+                    "author_email": commit.author_email,
+                    "author_name": commit.author_name,
+                    "date": commit.date,
+                })
+            
+            # Convert pull requests from proto to dict list
+            pull_requests_data = []
+            for pr in repo.pull_requests:
+                pull_requests_data.append({
+                    "number": pr.number,
+                    "status": pr.status,
+                    "merged_at": pr.merged_at,
+                })
+            
             # Convert proto message to dictionary for calculators
             repo_data = {
                 "repository": {
@@ -97,6 +116,8 @@ class ProcessorServicer(processor_pb2_grpc.ProcessorServiceServicer):
                     "has_wiki_page": repo.has_wiki_page,
                     "has_milestones": repo.has_milestones,
                     "contributors": contributors_data,
+                    "commits_list": commits_data,
+                    "pull_requests": pull_requests_data,
                 }
             }
             
@@ -108,17 +129,22 @@ class ProcessorServicer(processor_pb2_grpc.ProcessorServiceServicer):
             geodispersion_score = GeodispersionCalculator.compute(repo_data)
             logger.info(f"Computed geodispersion score: {geodispersion_score}")
             
-            # Return response with both metrics
+            # Compute longevity metric
+            longevity_score = LongevityCalculator.compute(repo_data)
+            logger.info(f"Computed longevity score: {longevity_score}")
+            
+            # Return response with all metrics
             return processor_pb2.ProcessResponse(
                 formality=formality_score,
-                geodispersion=geodispersion_score
+                geodispersion=geodispersion_score,
+                longevity=longevity_score
             )
             
         except Exception as e:
             logger.error(f"Processing error: {str(e)}", exc_info=True)
             context.set_code(grpc.StatusCode.INTERNAL)
             context.set_details(f"Processing error: {str(e)}")
-            return processor_pb2.ProcessResponse(formality=0.0, geodispersion=0.0)
+            return processor_pb2.ProcessResponse(formality=0.0, geodispersion=0.0, longevity=0.0)
 
 
 def serve(log_level=logging.INFO):

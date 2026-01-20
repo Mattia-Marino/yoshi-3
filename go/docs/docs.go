@@ -116,6 +116,23 @@ const docTemplate = `{
         }
     },
     "definitions": {
+        "models.CommitInfo": {
+            "type": "object",
+            "properties": {
+                "author_email": {
+                    "type": "string"
+                },
+                "author_name": {
+                    "type": "string"
+                },
+                "date": {
+                    "type": "string"
+                },
+                "sha": {
+                    "type": "string"
+                }
+            }
+        },
         "models.ContributorDetail": {
             "type": "object",
             "properties": {
@@ -167,11 +184,31 @@ const docTemplate = `{
                 }
             }
         },
+        "models.PullRequestInfo": {
+            "type": "object",
+            "properties": {
+                "merged_at": {
+                    "type": "string"
+                },
+                "number": {
+                    "type": "integer"
+                },
+                "status": {
+                    "type": "string"
+                }
+            }
+        },
         "models.RepositoryInfo": {
             "type": "object",
             "properties": {
                 "commits": {
                     "type": "integer"
+                },
+                "commits_list": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.CommitInfo"
+                    }
                 },
                 "contributors": {
                     "type": "array",
@@ -250,6 +287,12 @@ const docTemplate = `{
                 },
                 "owner": {
                     "type": "string"
+                },
+                "pull_requests": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.PullRequestInfo"
+                    }
                 },
                 "repo": {
                     "type": "string"

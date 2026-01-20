@@ -16,6 +16,8 @@ type RepositoryInfo struct {
 	CreatedAt                     time.Time           `json:"created_at"`
 	UpdatedAt                     time.Time           `json:"updated_at"`
 	Commits                       int                 `json:"commits"`
+	CommitsList                   []CommitInfo        `json:"commits_list"`
+	PullRequests                  []PullRequestInfo   `json:"pull_requests"`
 	Milestones                    int                 `json:"milestones"`
 	Contributors                  []ContributorDetail `json:"contributors"`
 	TotalContributorsCount        int                 `json:"total_contributors_count"`

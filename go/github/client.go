@@ -155,13 +155,15 @@ func (c *Client) GetRepositoryInfo(owner, repo string) models.RepositoryInfo {
 
 	// Proceed to fetch contributors, commits and milestones concurrently
 	var wg sync.WaitGroup
-	var commitErr, milestoneErr, contributorErr, recentContributorErr error
+	var commitErr, milestoneErr, contributorErr, recentContributorErr, allCommitsErr, allPRsErr error
 	var commits, milestones int
 	var contributors []string
 	var recentContributors []string
 	var totalContributors, nonAnonContributors int
+	var allCommits []models.CommitInfo
+	var allPRs []models.PullRequestInfo
 
-	wg.Add(4)
+	wg.Add(6)
 
 	// Get number of commits
 	go func() {
@@ -187,6 +189,18 @@ func (c *Client) GetRepositoryInfo(owner, repo string) models.RepositoryInfo {
 		recentContributors, recentContributorErr = c.getRecentContributors(owner, repo, 90)
 	}()
 
+	// Get all commits
+	go func() {
+		defer wg.Done()
+		allCommits, allCommitsErr = c.getAllCommits(owner, repo)
+	}()
+
+	// Get all pull requests
+	go func() {
+		defer wg.Done()
+		allPRs, allPRsErr = c.getAllPullRequests(owner, repo)
+	}()
+
 	wg.Wait()
 
 	// Process results
@@ -194,6 +208,20 @@ func (c *Client) GetRepositoryInfo(owner, repo string) models.RepositoryInfo {
 		info.Error = fmt.Sprintf("Failed to fetch commits: %v", commitErr)
 	} else {
 		info.Commits = commits
+	}
+
+	if allCommitsErr != nil {
+		c.logger.Warnf("Failed to fetch all commits: %v", allCommitsErr)
+		// Don't overwrite existing error, but log the warning
+	} else {
+		info.CommitsList = allCommits
+	}
+
+	if allPRsErr != nil {
+		c.logger.Warnf("Failed to fetch pull requests: %v", allPRsErr)
+		// Don't overwrite existing error, but log the warning
+	} else {
+		info.PullRequests = allPRs
 	}
 
 	if milestoneErr != nil {
@@ -650,4 +678,108 @@ func (c *Client) getContributorsDetails(usernames []string) ([]models.Contributo
 	}
 
 	return results, nil
+}
+
+// getAllCommits fetches all commits from a repository
+func (c *Client) getAllCommits(owner, repo string) ([]models.CommitInfo, error) {
+	opts := &gith.CommitsListOptions{
+		ListOptions: gith.ListOptions{
+			PerPage: 100,
+		},
+	}
+
+	var allCommits []models.CommitInfo
+
+	for {
+		commits, resp, err := c.client.Repositories.ListCommits(c.ctx, owner, repo, opts)
+		if err != nil {
+			return nil, err
+		}
+
+		for _, commit := range commits {
+			commitInfo := models.CommitInfo{}
+
+			// Set SHA
+			if commit.SHA != nil {
+				commitInfo.SHA = *commit.SHA
+			}
+
+			// Get author info from commit data (not GitHub user)
+			if commit.Commit != nil && commit.Commit.Author != nil {
+				if commit.Commit.Author.Email != nil {
+					commitInfo.AuthorEmail = *commit.Commit.Author.Email
+				}
+				if commit.Commit.Author.Name != nil {
+					commitInfo.AuthorName = *commit.Commit.Author.Name
+				}
+				if commit.Commit.Author.Date != nil {
+					commitInfo.Date = commit.Commit.Author.Date.Time
+				}
+			}
+
+			allCommits = append(allCommits, commitInfo)
+		}
+
+		if resp.NextPage == 0 {
+			break
+		}
+		opts.Page = resp.NextPage
+	}
+
+	return allCommits, nil
+}
+
+// getAllPullRequests fetches all pull requests from a repository
+func (c *Client) getAllPullRequests(owner, repo string) ([]models.PullRequestInfo, error) {
+	// Fetch all PRs (open, closed, merged)
+	opts := &gith.PullRequestListOptions{
+		State: "all",
+		ListOptions: gith.ListOptions{
+			PerPage: 100,
+		},
+	}
+
+	var allPRs []models.PullRequestInfo
+
+	for {
+		prs, resp, err := c.client.PullRequests.List(c.ctx, owner, repo, opts)
+		if err != nil {
+			return nil, err
+		}
+
+		for _, pr := range prs {
+			prInfo := models.PullRequestInfo{}
+
+			// Set PR number
+			if pr.Number != nil {
+				prInfo.Number = *pr.Number
+			}
+
+			// Determine status
+			if pr.State != nil {
+				if *pr.State == "open" {
+					prInfo.Status = "open"
+				} else if pr.MergedAt != nil {
+					prInfo.Status = "merged"
+				} else {
+					prInfo.Status = "closed"
+				}
+			}
+
+			// Set merged_at if available
+			if pr.MergedAt != nil {
+				mergedTime := pr.MergedAt.Time
+				prInfo.MergedAt = &mergedTime
+			}
+
+			allPRs = append(allPRs, prInfo)
+		}
+
+		if resp.NextPage == 0 {
+			break
+		}
+		opts.Page = resp.NextPage
+	}
+
+	return allPRs, nil
 }
