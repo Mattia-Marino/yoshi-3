@@ -80,14 +80,25 @@ class ProcessorServicer(processor_pb2_grpc.ProcessorServiceServicer):
                     "updated_at": contributor.updated_at,
                 })
             
-            # Convert commits from proto to dict list
-            commits_data = []
-            for commit in repo.commits_list:
-                commits_data.append({
-                    "sha": commit.sha,
-                    "author_email": commit.author_email,
-                    "author_name": commit.author_name,
-                    "date": commit.date,
+            # Convert contributor_stats from proto to dict list
+            contributor_stats_data = []
+            for stat in repo.contributor_stats:
+                # Convert weeks data
+                weeks_data = []
+                for week in stat.weeks:
+                    weeks_data.append({
+                        "week": week.week,
+                        "additions": week.additions,
+                        "deletions": week.deletions,
+                        "commits": week.commits,
+                    })
+                
+                contributor_stats_data.append({
+                    "author": stat.author,
+                    "total": stat.total,
+                    "weeks": weeks_data,
+                    "first_commit": stat.first_commit,
+                    "last_commit": stat.last_commit,
                 })
             
             # Convert pull requests from proto to dict list
@@ -116,7 +127,7 @@ class ProcessorServicer(processor_pb2_grpc.ProcessorServiceServicer):
                     "has_wiki_page": repo.has_wiki_page,
                     "has_milestones": repo.has_milestones,
                     "contributors": contributors_data,
-                    "commits_list": commits_data,
+                    "contributor_stats": contributor_stats_data,
                     "pull_requests": pull_requests_data,
                 }
             }

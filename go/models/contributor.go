@@ -23,3 +23,20 @@ type ContributorDetail struct {
 	// Error holds an error message when retrieval for this user failed
 	Error string `json:"error,omitempty"`
 }
+
+// ContributorStats holds aggregated statistics for a contributor from stats/contributors endpoint
+type ContributorStats struct {
+	Author      string    `json:"author"`       // GitHub login
+	Total       int       `json:"total"`        // Total number of commits
+	Weeks       []Week    `json:"weeks"`        // Weekly activity
+	FirstCommit time.Time `json:"first_commit"` // Date of first commit (derived from weeks)
+	LastCommit  time.Time `json:"last_commit"`  // Date of last commit (derived from weeks)
+}
+
+// Week represents weekly commit activity
+type Week struct {
+	WeekTimestamp int64 `json:"week"`      // Unix timestamp for start of week
+	Additions     int   `json:"additions"` // Lines added
+	Deletions     int   `json:"deletions"` // Lines deleted
+	Commits       int   `json:"commits"`   // Number of commits
+}

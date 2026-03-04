@@ -79,7 +79,7 @@ class LongevityCalculator:
         return acceptance_rate
     
     @staticmethod
-    def _compute_development_distribution(commits_list: List[Dict]) -> float:
+    def _compute_development_distribution(contributor_stats: List[Dict]) -> float:
         """
         Compute Development Distribution via Gini Coefficient: D_dist = 1 - G
         
@@ -88,30 +88,27 @@ class LongevityCalculator:
         G = 1 means perfect inequality (one person does everything)
         
         Args:
-            commits_list: List of commit dicts with 'author_email' or 'author_name' fields
+            contributor_stats: List of contributor stat dicts with 'author' and 'total' fields
             
         Returns:
             float: Development distribution score (0.0 to 1.0), higher is better
         """
-        if not commits_list:
-            logger.debug("  No commits found")
+        if not contributor_stats:
+            logger.debug("  No contributor stats found")
             return 0.0
         
-        # Count commits per contributor
-        commit_counts = defaultdict(int)
+        # Extract commit counts from contributor stats
+        counts = [stat.get("total", 0) for stat in contributor_stats if stat.get("total", 0) > 0]
+        counts.sort()
         
-        for commit in commits_list:
-            # Use author_email as primary identifier, fall back to author_name
-            author_id = commit.get("author_email") or commit.get("author_name") or "unknown"
-            commit_counts[author_id] += 1
-        
-        # Get sorted list of commit counts
-        counts = sorted(commit_counts.values())
         n = len(counts)
+        total_commits = sum(counts)
+        n = len(counts)
+        total_commits = sum(counts)
         
-        logger.debug(f"  Total commits: {len(commits_list)}")
+        logger.debug(f"  Total commits: {total_commits}")
         logger.debug(f"  Unique contributors: {n}")
-        logger.debug(f"  Commits per contributor: min={min(counts)}, max={max(counts)}, mean={sum(counts)/n:.2f}")
+        logger.debug(f"  Commits per contributor: min={min(counts)}, max={max(counts)}, mean={total_commits/n:.2f}")
         
         if n == 0:
             logger.debug("  No contributors found, returning 0.0")
@@ -137,50 +134,44 @@ class LongevityCalculator:
         return d_dist
     
     @staticmethod
-    def _compute_contributor_retention(commits_list: List[Dict]) -> float:
+    def _compute_contributor_retention(contributor_stats: List[Dict]) -> float:
         """
         Compute Contributor Retention: C_ret = Contributors with tenure > 365 days / Total contributors
         
         Tenure is calculated as the time between first and last commit for each contributor.
         
         Args:
-            commits_list: List of commit dicts with 'author_email', 'author_name', and 'date' fields
+            contributor_stats: List of contributor stat dicts with 'first_commit' and 'last_commit' fields
             
         Returns:
             float: Contributor retention rate (0.0 to 1.0)
         """
-        if not commits_list:
-            logger.debug("  No commits found")
+        if not contributor_stats:
+            logger.debug("  No contributor stats found")
             return 0.0
-        
-        # Track first and last commit for each contributor
-        contributor_dates = defaultdict(lambda: {"first": None, "last": None})
-        
-        for commit in commits_list:
-            author_id = commit.get("author_email") or commit.get("author_name") or "unknown"
-            commit_date = LongevityCalculator._parse_date(commit.get("date"))
-            
-            if not commit_date:
-                continue
-            
-            if contributor_dates[author_id]["first"] is None:
-                contributor_dates[author_id]["first"] = commit_date
-                contributor_dates[author_id]["last"] = commit_date
-            else:
-                if commit_date < contributor_dates[author_id]["first"]:
-                    contributor_dates[author_id]["first"] = commit_date
-                if commit_date > contributor_dates[author_id]["last"]:
-                    contributor_dates[author_id]["last"] = commit_date
         
         # Calculate tenure for each contributor
         long_term_contributors = 0
-        total_contributors = len(contributor_dates)
+        total_contributors = 0
         
-        for author_id, dates in contributor_dates.items():
-            if dates["first"] and dates["last"]:
-                tenure_days = (dates["last"] - dates["first"]).days
-                if tenure_days > 365:
-                    long_term_contributors += 1
+        for stat in contributor_stats:
+            first_commit_str = stat.get("first_commit")
+            last_commit_str = stat.get("last_commit")
+            
+            if not first_commit_str or not last_commit_str:
+                continue
+            
+            first_commit = LongevityCalculator._parse_date(first_commit_str)
+            last_commit = LongevityCalculator._parse_date(last_commit_str)
+            
+            if not first_commit or not last_commit:
+                continue
+            
+            total_contributors += 1
+            tenure_days = (last_commit - first_commit).days
+            
+            if tenure_days > 365:
+                long_term_contributors += 1
         
         logger.debug(f"  Total contributors: {total_contributors}")
         logger.debug(f"  Contributors with tenure > 365 days: {long_term_contributors}")
@@ -195,51 +186,64 @@ class LongevityCalculator:
         return retention_rate
     
     @staticmethod
-    def _compute_technical_pulse(commits_list: List[Dict]) -> float:
+    def _compute_technical_pulse(contributor_stats: List[Dict]) -> float:
         """
         Compute Technical Pulse: P_tech = Active weeks in last year / 52
         
         Counts how many weeks in the previous year had at least 1 commit.
         
         Args:
-            commits_list: List of commit dicts with 'date' field
+            contributor_stats: List of contributor stat dicts with 'weeks' field
             
         Returns:
             float: Technical pulse score (0.0 to 1.0)
         """
-        if not commits_list:
-            logger.debug("  No commits found")
+        if not contributor_stats:
+            logger.debug("  No contributor stats found")
             return 0.0
         
-        # Get current date (use the most recent commit as reference)
-        all_dates = []
-        for commit in commits_list:
-            commit_date = LongevityCalculator._parse_date(commit.get("date"))
-            if commit_date:
-                all_dates.append(commit_date)
+        # Find the most recent commit date from all contributors
+        all_last_commits = []
+        for stat in contributor_stats:
+            last_commit_str = stat.get("last_commit")
+            if last_commit_str:
+                last_commit_date = LongevityCalculator._parse_date(last_commit_str)
+                if last_commit_date:
+                    all_last_commits.append(last_commit_date)
         
-        if not all_dates:
+        if not all_last_commits:
             logger.debug("  No valid commit dates found")
             return 0.0
         
         # Use the most recent commit date as the reference point
-        reference_date = max(all_dates)
+        reference_date = max(all_last_commits)
         one_year_ago = reference_date - timedelta(days=365)
+        one_year_ago_timestamp = int(one_year_ago.timestamp())
         
         logger.debug(f"  Reference date (most recent commit): {reference_date.date()}")
         logger.debug(f"  One year ago: {one_year_ago.date()}")
         
-        # Track which weeks had commits
+        # Track which weeks had commits in the last year
         active_weeks = set()
         commits_in_period = 0
         
-        for commit_date in all_dates:
-            if commit_date >= one_year_ago:
-                # Calculate ISO week number
-                iso_year, iso_week, _ = commit_date.isocalendar()
-                week_key = (iso_year, iso_week)
-                active_weeks.add(week_key)
-                commits_in_period += 1
+        for stat in contributor_stats:
+            weeks = stat.get("weeks")
+            if not weeks:
+                continue
+            
+            for week in weeks:
+                week_timestamp = week.get("week", 0)
+                week_commits = week.get("commits", 0)
+                
+                # Check if this week is within the last year
+                if week_timestamp >= one_year_ago_timestamp and week_commits > 0:
+                    # Convert timestamp to datetime for week calculation
+                    week_date = datetime.fromtimestamp(week_timestamp)
+                    iso_year, iso_week, _ = week_date.isocalendar()
+                    week_key = (iso_year, iso_week)
+                    active_weeks.add(week_key)
+                    commits_in_period += week_commits
         
         active_week_count = len(active_weeks)
         
@@ -282,23 +286,23 @@ class LongevityCalculator:
         logger.debug("=" * 60)
         
         # Extract data
-        commits_list = repo.get("commits_list", [])
+        contributor_stats = repo.get("contributor_stats", [])
         pull_requests = repo.get("pull_requests", [])
         
-        logger.debug(f"Input data: {len(commits_list)} commits, {len(pull_requests)} pull requests")
+        logger.debug(f"Input data: {len(contributor_stats)} contributors, {len(pull_requests)} pull requests")
         
         # Compute each dimension
         logger.debug("\n1. Computing PR Acceptance Rate (A_pr)...")
         a_pr = cls._compute_pr_acceptance_rate(pull_requests)
         
         logger.debug("\n2. Computing Development Distribution (D_dist)...")
-        d_dist = cls._compute_development_distribution(commits_list)
+        d_dist = cls._compute_development_distribution(contributor_stats)
         
         logger.debug("\n3. Computing Contributor Retention (C_ret)...")
-        c_ret = cls._compute_contributor_retention(commits_list)
+        c_ret = cls._compute_contributor_retention(contributor_stats)
         
         logger.debug("\n4. Computing Technical Pulse (P_tech)...")
-        p_tech = cls._compute_technical_pulse(commits_list)
+        p_tech = cls._compute_technical_pulse(contributor_stats)
         
         # Calculate final longevity score
         longevity = (0.30 * d_dist) + (0.30 * c_ret) + (0.25 * a_pr) + (0.15 * p_tech)
