@@ -77,7 +77,7 @@ func main() {
 		Addr:         ":" + cfg.Port,
 		Handler:      handler,
 		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 300 * time.Second, // aumentato per risposte lunghe
+		WriteTimeout: 15 * time.Minute, // Increased to handle large repositories
 		IdleTimeout:  60 * time.Second,
 	}
 

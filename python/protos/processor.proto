@@ -1,0 +1,113 @@
+syntax = "proto3";
+
+package processor;
+
+// Processing service for GitHub repository metrics
+service ProcessorService {
+    // Health check endpoint
+    rpc Health(HealthRequest) returns (HealthResponse);
+    
+    // Process repository data and compute metrics
+    rpc Process(ProcessRequest) returns (ProcessResponse);
+}
+
+// Health check request (empty)
+message HealthRequest {}
+
+// Health check response
+message HealthResponse {
+    string status = 1;
+    string message = 2;
+}
+
+// Week stats for contributor activity
+message WeekStats {
+    int64 week = 1;           // Unix timestamp of week start
+    int32 additions = 2;      // Lines added that week
+    int32 deletions = 3;      // Lines deleted that week
+    int32 commits = 4;        // Number of commits that week
+}
+
+// Contributor statistics with weekly activity
+message ContributorStats {
+    string author = 1;                 // GitHub username/login
+    int32 total = 2;                   // Total commits by this contributor
+    repeated WeekStats weeks = 3;      // Weekly activity stats
+    string first_commit = 4;           // ISO 8601 timestamp of first commit
+    string last_commit = 5;            // ISO 8601 timestamp of last commit
+}
+
+// Pull Request data
+message PullRequest {
+    int32 number = 1;
+    string status = 2;
+    string merged_at = 3;
+}
+
+// Contributor data
+message Contributor {
+    string login = 1;
+    int32 id = 2;
+    string node_id = 3;
+    string avatar_url = 4;
+    string html_url = 5;
+    string type = 6;
+    string name = 7;
+    string company = 8;
+    string blog = 9;
+    string location = 10;
+    string email = 11;
+    string bio = 12;
+    string created_at = 13;
+    string updated_at = 14;
+}
+
+// Repository data for processing
+message Repository {
+    string owner = 1;
+    string repo = 2;
+    string description = 3;
+    int32 stars = 4;
+    int32 forks = 5;
+    int32 open_issues = 6;
+    string language = 7;
+    string created_at = 8;
+    string updated_at = 9;
+    int32 commits = 10;
+    int32 milestones = 11;
+    int32 total_contributors_count = 12;
+    int32 non_anonymous_contributors_count = 13;
+    int32 selected_contributors_count = 14;
+    int32 contributors_with_location_count = 15;
+    int32 size = 16;
+    int32 watchers = 17;
+    bool has_issues = 18;
+    bool has_wiki = 19;
+    bool has_code_of_conduct = 20;
+    bool has_readme = 21;
+    bool has_description = 22;
+    bool has_contributing_guidelines = 23;
+    bool has_license = 24;
+    bool has_security_policy = 25;
+    bool has_issues_template = 26;
+    bool has_pull_request_template = 27;
+    bool has_wiki_page = 28;
+    bool has_milestones = 29;
+    string default_branch = 30;
+    string license = 31;
+    repeated Contributor contributors = 32;
+    repeated ContributorStats contributor_stats = 33;
+    repeated PullRequest pull_requests = 34;
+}
+
+// Process request containing repository data
+message ProcessRequest {
+    Repository repository = 1;
+}
+
+// Process response containing computed metrics
+message ProcessResponse {
+    double formality = 1;
+    double geodispersion = 2;
+    double longevity = 3;
+}

@@ -155,13 +155,15 @@ func (c *Client) GetRepositoryInfo(owner, repo string) models.RepositoryInfo {
 
 	// Proceed to fetch contributors, commits and milestones concurrently
 	var wg sync.WaitGroup
-	var commitErr, milestoneErr, contributorErr, recentContributorErr error
+	var commitErr, milestoneErr, contributorErr, recentContributorErr, contributorStatsErr, allPRsErr error
 	var commits, milestones int
 	var contributors []string
 	var recentContributors []string
 	var totalContributors, nonAnonContributors int
+	var contributorStats []models.ContributorStats
+	var allPRs []models.PullRequestInfo
 
-	wg.Add(4)
+	wg.Add(6)
 
 	// Get number of commits
 	go func() {
@@ -187,6 +189,19 @@ func (c *Client) GetRepositoryInfo(owner, repo string) models.RepositoryInfo {
 		recentContributors, recentContributorErr = c.getRecentContributors(owner, repo, 90)
 	}()
 
+	// Get contributor statistics with ALL contributors (not just top 100)
+	// This provides commit counts per user, weekly activity, and tenure data
+	go func() {
+		defer wg.Done()
+		contributorStats, contributorStatsErr = c.getAllContributorStats(owner, repo)
+	}()
+
+	// Get all pull requests (limited to 1000 for performance)
+	go func() {
+		defer wg.Done()
+		allPRs, allPRsErr = c.getAllPullRequests(owner, repo, 1000)
+	}()
+
 	wg.Wait()
 
 	// Process results
@@ -194,6 +209,22 @@ func (c *Client) GetRepositoryInfo(owner, repo string) models.RepositoryInfo {
 		info.Error = fmt.Sprintf("Failed to fetch commits: %v", commitErr)
 	} else {
 		info.Commits = commits
+	}
+
+	if contributorStatsErr != nil {
+		c.logger.Warnf("Failed to fetch contributor stats: %v", contributorStatsErr)
+		// Set to empty slice instead of leaving as nil (which becomes null in JSON)
+		info.ContributorStats = []models.ContributorStats{}
+	} else {
+		info.ContributorStats = contributorStats
+		c.logger.Infof("Fetched statistics for %d contributors", len(contributorStats))
+	}
+
+	if allPRsErr != nil {
+		c.logger.Warnf("Failed to fetch pull requests: %v", allPRsErr)
+		// Don't overwrite existing error, but log the warning
+	} else {
+		info.PullRequests = allPRs
 	}
 
 	if milestoneErr != nil {
@@ -650,4 +681,356 @@ func (c *Client) getContributorsDetails(usernames []string) ([]models.Contributo
 	}
 
 	return results, nil
+}
+
+// getAllCommits fetches commits from a repository with an optional limit
+// If maxCommits is 0, fetches all commits. Otherwise, stops after maxCommits.
+func (c *Client) getAllCommits(owner, repo string, maxCommits int) ([]models.CommitInfo, error) {
+	opts := &gith.CommitsListOptions{
+		ListOptions: gith.ListOptions{
+			PerPage: 100,
+		},
+	}
+
+	var allCommits []models.CommitInfo
+
+	for {
+		commits, resp, err := c.client.Repositories.ListCommits(c.ctx, owner, repo, opts)
+		if err != nil {
+			return nil, err
+		}
+
+		for _, commit := range commits {
+			// Check if we've reached the limit
+			if maxCommits > 0 && len(allCommits) >= maxCommits {
+				c.logger.Infof("Reached commit limit of %d for %s/%s", maxCommits, owner, repo)
+				return allCommits, nil
+			}
+
+			commitInfo := models.CommitInfo{}
+
+			// Set SHA
+			if commit.SHA != nil {
+				commitInfo.SHA = *commit.SHA
+			}
+
+			// Get author info from commit data (not GitHub user)
+			if commit.Commit != nil && commit.Commit.Author != nil {
+				if commit.Commit.Author.Email != nil {
+					commitInfo.AuthorEmail = *commit.Commit.Author.Email
+				}
+				if commit.Commit.Author.Name != nil {
+					commitInfo.AuthorName = *commit.Commit.Author.Name
+				}
+				if commit.Commit.Author.Date != nil {
+					commitInfo.Date = commit.Commit.Author.Date.Time
+				}
+			}
+
+			allCommits = append(allCommits, commitInfo)
+		}
+
+		if resp.NextPage == 0 {
+			break
+		}
+		opts.Page = resp.NextPage
+	}
+
+	return allCommits, nil
+}
+
+// getAllPullRequests fetches pull requests from a repository with an optional limit
+// If maxPRs is 0, fetches all PRs. Otherwise, stops after maxPRs.
+// Uses GitHub Search API to avoid timeouts on large repositories.
+// Note: Search API has a rate limit of 30 requests per minute.
+func (c *Client) getAllPullRequests(owner, repo string, maxPRs int) ([]models.PullRequestInfo, error) {
+	// Use Search API to avoid timeouts on large repositories
+	// Query for closed PRs in descending order
+	query := fmt.Sprintf("repo:%s/%s type:pr state:closed", owner, repo)
+
+	opts := &gith.SearchOptions{
+		Sort:  "created",
+		Order: "desc",
+		ListOptions: gith.ListOptions{
+			PerPage: 100,
+		},
+	}
+
+	var allPRs []models.PullRequestInfo
+
+	for {
+		// Search API has a rate limit of 30 requests/minute
+		result, resp, err := c.client.Search.Issues(c.ctx, query, opts)
+		if err != nil {
+			return nil, err
+		}
+
+		for _, issue := range result.Issues {
+			// Check if we've reached the limit
+			if maxPRs > 0 && len(allPRs) >= maxPRs {
+				c.logger.Infof("Reached PR limit of %d for %s/%s", maxPRs, owner, repo)
+				return allPRs, nil
+			}
+
+			prInfo := models.PullRequestInfo{}
+
+			// Set PR number
+			if issue.Number != nil {
+				prInfo.Number = *issue.Number
+			}
+
+			// Set created_at
+			if issue.CreatedAt != nil {
+				createdTime := issue.CreatedAt.Time
+				prInfo.CreatedAt = &createdTime
+			}
+
+			// Set closed_at
+			if issue.ClosedAt != nil {
+				closedTime := issue.ClosedAt.Time
+				prInfo.ClosedAt = &closedTime
+			}
+
+			allPRs = append(allPRs, prInfo)
+		}
+
+		if resp.NextPage == 0 {
+			break
+		}
+		opts.Page = resp.NextPage
+	}
+
+	// Fetch merged_at for each PR concurrently
+	c.logger.Infof("Fetching merged_at for %d PRs from %s/%s", len(allPRs), owner, repo)
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, 10) // Limit concurrent requests to 10
+
+	for i := range allPRs {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			sem <- struct{}{}        // Acquire
+			defer func() { <-sem }() // Release
+
+			pr, _, err := c.client.PullRequests.Get(c.ctx, owner, repo, allPRs[idx].Number)
+			if err != nil {
+				c.logger.Debugf("Failed to fetch PR #%d: %v", allPRs[idx].Number, err)
+				return
+			}
+
+			// Set merged_at if available
+			if pr.MergedAt != nil {
+				mergedTime := pr.MergedAt.Time
+				allPRs[idx].MergedAt = &mergedTime
+			}
+
+			// Determine status
+			if allPRs[idx].ClosedAt == nil {
+				allPRs[idx].Status = "open"
+			} else if allPRs[idx].MergedAt != nil {
+				allPRs[idx].Status = "merged"
+			} else {
+				allPRs[idx].Status = "closed"
+			}
+		}(i)
+	}
+
+	wg.Wait()
+
+	return allPRs, nil
+}
+
+// getContributorStatsWithRetry fetches aggregated contributor statistics using the stats/contributors endpoint
+// This is much more efficient than fetching all commits individually
+// Returns commit counts per contributor and weekly activity data for computing:
+// - Development Distribution (Gini coefficient from commit counts)
+// - Technical Pulse (active weeks in last year)
+// - Contributor Retention (tenure from first/last commit dates)
+func (c *Client) getContributorStatsWithRetry(owner, repo string) ([]models.ContributorStats, error) {
+	// Use the stats/contributors endpoint
+	// Note: This endpoint can take a while to compute on first request (GitHub caches it)
+	// We'll retry up to 8 times with increasing delays if GitHub returns 202 (still computing)
+
+	maxRetries := 8
+	var contributors []*gith.ContributorStats
+	var resp *gith.Response
+	var err error
+
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		contributors, resp, err = c.client.Repositories.ListContributorsStats(c.ctx, owner, repo)
+
+		if err != nil {
+			c.logger.Errorf("Error fetching contributor stats (attempt %d/%d): %v", attempt+1, maxRetries+1, err)
+			return []models.ContributorStats{}, fmt.Errorf("failed to fetch contributor stats: %w", err)
+		}
+
+		// Check if GitHub is still computing the stats (returns 202 Accepted)
+		if resp.StatusCode == 202 {
+			if attempt < maxRetries {
+				// Exponential backoff: 2, 4, 8, 16, 32, 64, 128, 256 seconds (max ~8.5 minutes total)
+				waitTime := time.Duration(2<<uint(attempt)) * time.Second
+				c.logger.Infof("GitHub is computing contributor stats (attempt %d/%d), waiting %v...",
+					attempt+1, maxRetries+1, waitTime)
+				time.Sleep(waitTime)
+				continue
+			} else {
+				// After all retries, return error instead of empty array
+				return []models.ContributorStats{}, fmt.Errorf("GitHub stats still computing after %d attempts and ~8.5 minutes", maxRetries+1)
+			}
+		}
+
+		// Success - status 200
+		break
+	}
+
+	// Check if we got any contributors
+	if len(contributors) == 0 {
+		c.logger.Warnf("No contributor stats returned for %s/%s", owner, repo)
+		return []models.ContributorStats{}, nil
+	}
+
+	var stats []models.ContributorStats
+
+	for _, contrib := range contributors {
+		if contrib.Author == nil || contrib.Author.Login == nil {
+			continue
+		}
+
+		// Skip if Total is nil or zero
+		if contrib.Total == nil || *contrib.Total == 0 {
+			continue
+		}
+
+		stat := models.ContributorStats{
+			Author: *contrib.Author.Login,
+			Total:  *contrib.Total,
+			Weeks:  []models.Week{}, // Initialize to empty slice
+		}
+
+		// Convert weeks - include only weeks with commits > 0
+		var firstCommitTime, lastCommitTime time.Time
+		for _, week := range contrib.Weeks {
+			if week.Week == nil || week.Commits == nil || *week.Commits == 0 {
+				continue
+			}
+
+			weekData := models.Week{
+				WeekTimestamp: week.Week.Time.Unix(),
+				Commits:       *week.Commits,
+			}
+
+			if week.Additions != nil {
+				weekData.Additions = *week.Additions
+			}
+			if week.Deletions != nil {
+				weekData.Deletions = *week.Deletions
+			}
+
+			stat.Weeks = append(stat.Weeks, weekData)
+
+			// Track first and last commit dates
+			weekTime := week.Week.Time
+			if firstCommitTime.IsZero() || weekTime.Before(firstCommitTime) {
+				firstCommitTime = weekTime
+			}
+			if lastCommitTime.IsZero() || weekTime.After(lastCommitTime) {
+				lastCommitTime = weekTime
+			}
+		}
+
+		stat.FirstCommit = firstCommitTime
+		stat.LastCommit = lastCommitTime
+
+		stats = append(stats, stat)
+	}
+
+	c.logger.Infof("Successfully fetched stats for %d contributors with %d total commits",
+		len(stats), sumTotalCommits(stats))
+
+	return stats, nil
+}
+
+// sumTotalCommits is a helper to sum all commits across contributors
+func sumTotalCommits(stats []models.ContributorStats) int {
+	total := 0
+	for _, s := range stats {
+		total += s.Total
+	}
+	return total
+}
+
+// getAllContributorStats fetches ALL contributors with their first/last commit dates and commit counts
+// This efficiently uses the stats/contributors endpoint (1 API call) which provides:
+// - Commit counts per contributor
+// - Weekly activity data
+// - First/last commit dates (derived from weeks)
+// This saves hundreds of API calls compared to individual commit fetching.
+func (c *Client) getAllContributorStats(owner, repo string) ([]models.ContributorStats, error) {
+	c.logger.Infof("Fetching contributor statistics for %s/%s using stats/contributors endpoint", owner, repo)
+
+	// Use the stats/contributors endpoint - this is THE most efficient way to get all data
+	// It provides everything in one call: commit counts, weekly activity, and date ranges
+	weeklyStats, err := c.getContributorStatsWithRetry(owner, repo)
+	if err != nil {
+		c.logger.Errorf("Failed to fetch contributor stats: %v", err)
+		return []models.ContributorStats{}, fmt.Errorf("failed to fetch contributor stats: %w", err)
+	}
+
+	if len(weeklyStats) == 0 {
+		c.logger.Warnf("No contributor stats returned for %s/%s", owner, repo)
+		return []models.ContributorStats{}, nil
+	}
+
+	c.logger.Infof("Successfully fetched stats for %d contributors with weekly activity data", len(weeklyStats))
+	return weeklyStats, nil
+}
+
+// getContributorCommitDates efficiently fetches the first and last commit dates for a contributor
+// Makes only 2 API calls: one for newest commit, one for oldest commit
+func (c *Client) getContributorCommitDates(owner, repo, author string) (time.Time, time.Time, error) {
+	var firstCommit, lastCommit time.Time
+
+	// Fetch the most recent commit (last commit date)
+	lastOpts := &gith.CommitsListOptions{
+		Author: author,
+		ListOptions: gith.ListOptions{
+			PerPage: 1,
+			Page:    1,
+		},
+	}
+
+	commits, resp, err := c.client.Repositories.ListCommits(c.ctx, owner, repo, lastOpts)
+	if err != nil {
+		return firstCommit, lastCommit, err
+	}
+
+	if len(commits) > 0 && commits[0].Commit != nil && commits[0].Commit.Author != nil && commits[0].Commit.Author.Date != nil {
+		lastCommit = commits[0].Commit.Author.Date.Time
+	}
+
+	// Fetch the oldest commit (first commit date)
+	// Use LastPage from response to jump to the last page
+	if resp != nil && resp.LastPage > 0 {
+		firstOpts := &gith.CommitsListOptions{
+			Author: author,
+			ListOptions: gith.ListOptions{
+				PerPage: 1,
+				Page:    resp.LastPage,
+			},
+		}
+
+		firstCommits, _, err := c.client.Repositories.ListCommits(c.ctx, owner, repo, firstOpts)
+		if err != nil {
+			return firstCommit, lastCommit, err
+		}
+
+		if len(firstCommits) > 0 && firstCommits[0].Commit != nil && firstCommits[0].Commit.Author != nil && firstCommits[0].Commit.Author.Date != nil {
+			firstCommit = firstCommits[0].Commit.Author.Date.Time
+		}
+	} else if len(commits) > 0 {
+		// Only one page of commits, so first = last
+		firstCommit = lastCommit
+	}
+
+	return firstCommit, lastCommit, nil
 }

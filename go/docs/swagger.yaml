@@ -1,5 +1,16 @@
 basePath: /
 definitions:
+  models.CommitInfo:
+    properties:
+      author_email:
+        type: string
+      author_name:
+        type: string
+      date:
+        type: string
+      sha:
+        type: string
+    type: object
   models.ContributorDetail:
     properties:
       avatar_url:
@@ -34,10 +45,23 @@ definitions:
       updated_at:
         type: string
     type: object
+  models.PullRequestInfo:
+    properties:
+      merged_at:
+        type: string
+      number:
+        type: integer
+      status:
+        type: string
+    type: object
   models.RepositoryInfo:
     properties:
       commits:
         type: integer
+      commits_list:
+        items:
+          $ref: '#/definitions/models.CommitInfo'
+        type: array
       contributors:
         items:
           $ref: '#/definitions/models.ContributorDetail'
@@ -90,6 +114,10 @@ definitions:
         type: integer
       owner:
         type: string
+      pull_requests:
+        items:
+          $ref: '#/definitions/models.PullRequestInfo'
+        type: array
       repo:
         type: string
       selected_contributors_count:
