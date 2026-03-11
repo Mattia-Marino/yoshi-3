@@ -51,18 +51,20 @@ class LongevityCalculator:
             return 0.0
         
         # Count merged and closed PRs
+        # Per spec: closed PRs = all PRs with state=closed (includes merged)
+        # Merged PRs = closed PRs where merged_at is not null
         merged_count = 0
         closed_count = 0
         
         for pr in pull_requests:
             status = pr.get("status", "").lower()
             
-            # Count as closed if status is 'closed' or 'merged'
-            if status == "merged":
-                merged_count += 1
+            # Only consider closed PRs (status "closed" or "merged", not "open")
+            if status in ("closed", "merged"):
                 closed_count += 1
-            elif status == "closed":
-                closed_count += 1
+                # A PR is merged if merged_at is not null
+                if pr.get("merged_at") is not None:
+                    merged_count += 1
         
         logger.debug(f"  Total PRs: {len(pull_requests)}")
         logger.debug(f"  Merged PRs: {merged_count}")
@@ -102,13 +104,6 @@ class LongevityCalculator:
         counts.sort()
         
         n = len(counts)
-        total_commits = sum(counts)
-        n = len(counts)
-        total_commits = sum(counts)
-        
-        logger.debug(f"  Total commits: {total_commits}")
-        logger.debug(f"  Unique contributors: {n}")
-        logger.debug(f"  Commits per contributor: min={min(counts)}, max={max(counts)}, mean={total_commits/n:.2f}")
         
         if n == 0:
             logger.debug("  No contributors found, returning 0.0")
@@ -117,6 +112,12 @@ class LongevityCalculator:
         if n == 1:
             logger.debug("  Only one contributor, perfect inequality, returning 0.0")
             return 0.0
+        
+        total_commits = sum(counts)
+        
+        logger.debug(f"  Total commits: {total_commits}")
+        logger.debug(f"  Unique contributors: {n}")
+        logger.debug(f"  Commits per contributor: min={min(counts)}, max={max(counts)}, mean={total_commits/n:.2f}")
         
         # Compute Gini coefficient
         # G = sum((2i - n - 1) * x_i) / (n * sum(x_i))
