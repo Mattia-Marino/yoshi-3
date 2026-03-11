@@ -503,6 +503,10 @@ class GeodispersionCalculator:
         variance = sum((x - mean) ** 2 for x in values) / len(values)
         return math.sqrt(variance)
     
+    # Maximum possible values for normalization
+    _MAX_GEO_DISTANCE_KM = 20015.0       # Half Earth circumference
+    _MAX_CULTURAL_DISTANCE = 200.0       # Empirical max across 6 Hofstede dims (each 0-100)
+
     @classmethod
     def compute(cls, repo_data: Dict) -> float:
         """
@@ -572,21 +576,28 @@ class GeodispersionCalculator:
         geo_std = cls._std_dev(geo_distances)
         logger.debug(f"  Geographic std dev: {geo_std:.2f} km")
         
+        # Normalize geographic std dev to [0, 1]
+        geo_std_normalized = geo_std / cls._MAX_GEO_DISTANCE_KM
+        logger.debug(f"  Geographic std dev (normalized): {geo_std_normalized:.4f}")
+
         # Calculate cultural distances
         logger.debug("\nCalculating cultural distances (Hofstede)...")
         cultural_distances = cls._calculate_cultural_distances(matched_locations)
         logger.debug(f"  Computed {len(cultural_distances)} pairwise cultural distances")
-        
+
         if cultural_distances:
             logger.debug(f"  Cultural distances: min={min(cultural_distances):.2f}, max={max(cultural_distances):.2f}, mean={sum(cultural_distances)/len(cultural_distances):.2f}")
             cultural_std = cls._std_dev(cultural_distances)
             logger.debug(f"  Cultural std dev: {cultural_std:.2f}")
+            # Normalize cultural std dev to [0, 1]
+            cultural_std_normalized = cultural_std / cls._MAX_CULTURAL_DISTANCE
+            logger.debug(f"  Cultural std dev (normalized): {cultural_std_normalized:.4f}")
         else:
             logger.debug("  No cultural distances computed (missing Hofstede data for countries)")
-            cultural_std = 0.0
-        
-        # Geodispersion is the sum of both standard deviations
-        geodispersion = geo_std + cultural_std
-        logger.debug(f"\nFinal geodispersion score: {geo_std:.2f} + {cultural_std:.2f} = {geodispersion:.2f}")
-        
+            cultural_std_normalized = 0.0
+
+        # Geodispersion is the sum of both normalized standard deviations (range: 0 to 2)
+        geodispersion = geo_std_normalized + cultural_std_normalized
+        logger.debug(f"\nFinal geodispersion score: {geo_std_normalized:.4f} + {cultural_std_normalized:.4f} = {geodispersion:.4f}")
+
         return geodispersion
