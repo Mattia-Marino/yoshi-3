@@ -1,8 +1,8 @@
 """
 gRPC Processing Server for GitHub Repository Metrics
 
-Generate the Python gRPC code by running:
-./generate.sh
+Generate the gRPC code for both Go and Python by running:
+./generate.sh (from the project root)
 """
 
 import grpc

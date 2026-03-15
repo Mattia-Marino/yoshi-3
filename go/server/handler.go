@@ -6,7 +6,9 @@ import (
 	"net/http"
 	"runtime"
 
+	"github-extractor/grpcclient"
 	"github-extractor/models"
+	pb "github-extractor/proto"
 
 	"github.com/sirupsen/logrus"
 )
@@ -31,15 +33,17 @@ type ExtractResponseLimits struct {
 
 // Handler handles HTTP requests for repository extraction
 type Handler struct {
-	service *Service
-	logger  *logrus.Logger
+	service         *Service
+	logger          *logrus.Logger
+	processorClient *grpcclient.ProcessorClient
 }
 
 // NewHandler creates a new HTTP handler
-func NewHandler(service *Service, logger *logrus.Logger) *Handler {
+func NewHandler(service *Service, logger *logrus.Logger, processorClient *grpcclient.ProcessorClient) *Handler {
 	return &Handler{
-		service: service,
-		logger:  logger,
+		service:         service,
+		logger:          logger,
+		processorClient: processorClient,
 	}
 }
 
@@ -117,7 +121,7 @@ func (h *Handler) ExtractHandler(w http.ResponseWriter, r *http.Request) {
 	gh := h.service.ghClient
 
 	// Run fast eligibility checks first (100 commits, last 90 days, 3 active contributors)
-	ok, reason, err := gh.CheckRepoEligibility(req.Owner, req.Repo, 100, 90, 3)
+	ok, reason, err := gh.CheckRepoEligibility(req.Owner, req.Repo, 1, 1000, 1)
 	if err != nil {
 		h.logger.Errorf("Error checking eligibility for %s/%s: %v", req.Owner, req.Repo, err)
 		http.Error(w, "internal error checking repository eligibility: "+err.Error(), http.StatusInternalServerError)
@@ -154,5 +158,90 @@ func (h *Handler) respondWithJSON(w http.ResponseWriter, statusCode int, payload
 func (h *Handler) respondWithError(w http.ResponseWriter, statusCode int, message string) {
 	h.respondWithJSON(w, statusCode, ExtractResponse{
 		Error: message,
+	})
+}
+
+// ProcessHandlerResponse represents the response from the /process endpoint
+type ProcessHandlerResponse struct {
+	Formality     float64 `json:"formality"`
+	Geodispersion float64 `json:"geodispersion"`
+	Longevity     float64 `json:"longevity"`
+	Error         string  `json:"error,omitempty"`
+}
+
+// ProcessHandler handles the POST request for extracting and processing repository metrics
+// @Summary Process repository metrics
+// @Description Extracts repository data and computes formality, geodispersion, and longevity metrics.
+// @Tags repository
+// @Accept json
+// @Produce json
+// @Param request body ExtractRequest true "Repository process request"
+// @Success 200 {object} ProcessHandlerResponse
+// @Failure 400 {object} ProcessHandlerResponse "Invalid request"
+// @Failure 422 {object} ProcessHandlerResponse "Repository not eligible"
+// @Failure 500 {object} ProcessHandlerResponse "Internal server error"
+// @Router /process [post]
+func (h *Handler) ProcessHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req ExtractRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.respondWithJSON(w, http.StatusBadRequest, ProcessHandlerResponse{Error: fmt.Sprintf("Invalid JSON: %v", err)})
+		return
+	}
+
+	if req.Owner == "" {
+		h.respondWithJSON(w, http.StatusBadRequest, ProcessHandlerResponse{Error: "owner is required"})
+		return
+	}
+	if req.Repo == "" {
+		h.respondWithJSON(w, http.StatusBadRequest, ProcessHandlerResponse{Error: "repo is required"})
+		return
+	}
+
+	if h.processorClient == nil {
+		h.respondWithJSON(w, http.StatusInternalServerError, ProcessHandlerResponse{Error: "processor service not configured"})
+		return
+	}
+
+	gh := h.service.ghClient
+
+	ok, reason, err := gh.CheckRepoEligibility(req.Owner, req.Repo, 1, 1000, 1)
+	if err != nil {
+		h.logger.Errorf("Error checking eligibility for %s/%s: %v", req.Owner, req.Repo, err)
+		h.respondWithJSON(w, http.StatusInternalServerError, ProcessHandlerResponse{Error: "internal error checking repository eligibility: " + err.Error()})
+		return
+	}
+	if !ok {
+		h.logger.Infof("Repository %s/%s not eligible: %s", req.Owner, req.Repo, reason)
+		h.respondWithJSON(w, http.StatusUnprocessableEntity, ProcessHandlerResponse{Error: reason})
+		return
+	}
+
+	// Extract repository info (same as /extract)
+	repoInfo := h.service.ProcessRepository(req.Owner, req.Repo)
+	if repoInfo.Error != "" {
+		h.respondWithJSON(w, http.StatusInternalServerError, ProcessHandlerResponse{Error: fmt.Sprintf("extraction failed: %s", repoInfo.Error)})
+		return
+	}
+
+	// Convert to proto message
+	repoProto := pb.RepositoryInfoToProto(repoInfo)
+
+	// Call gRPC ProcessorService
+	metrics, err := h.processorClient.Process(r.Context(), repoProto)
+	if err != nil {
+		h.logger.Errorf("gRPC Process failed for %s/%s: %v", req.Owner, req.Repo, err)
+		h.respondWithJSON(w, http.StatusInternalServerError, ProcessHandlerResponse{Error: fmt.Sprintf("processing failed: %v", err)})
+		return
+	}
+
+	h.respondWithJSON(w, http.StatusOK, ProcessHandlerResponse{
+		Formality:     metrics.Formality,
+		Geodispersion: metrics.Geodispersion,
+		Longevity:     metrics.Longevity,
 	})
 }

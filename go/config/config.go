@@ -9,6 +9,9 @@ const (
 	TokenEnvVar = "YOSHI_GH_TOKEN" // Environment variable name for GitHub token
 	DefaultPort = "6001"           // Default HTTP server port
 
+	// gRPC
+	DefaultGRPCAddress = "localhost:50051" // Default gRPC processor service address
+
 	// Logging
 	DefaultLogFile  = "./gh-extractor.log"
 	DefaultLogLevel = "info"
@@ -20,6 +23,7 @@ type Config struct {
 	Port        string
 	LogFile     string
 	LogLevel    string
+	GRPCAddress string
 }
 
 // Load configuration from environment and returns Config or error
@@ -33,6 +37,9 @@ func LoadConfig() (*Config, error) {
 	// Set server port
 	port := getEnv("PORT", DefaultPort)
 
+	// gRPC address
+	grpcAddr := getEnv("GRPC_ADDRESS", DefaultGRPCAddress)
+
 	// Logging
 	logFile := getEnv("LOG_FILE", DefaultLogFile)
 	logLevel := getEnv("LOG_LEVEL", DefaultLogLevel)
@@ -41,6 +48,7 @@ func LoadConfig() (*Config, error) {
 	return &Config{
 		GitHubToken: token,
 		Port:        port,
+		GRPCAddress: grpcAddr,
 		LogFile:     logFile,
 		LogLevel:    logLevel,
 	}, nil

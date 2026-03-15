@@ -11,6 +11,7 @@ import (
 
 	"github-extractor/config"
 	"github-extractor/github"
+	"github-extractor/grpcclient"
 	"github-extractor/server"
 
 	_ "github-extractor/docs"
@@ -64,8 +65,15 @@ func main() {
 	// Initialize service with worker pool
 	service := server.NewService(ghClient, appLogger)
 
+	// Initialize gRPC processor client
+	processorClient, err := grpcclient.NewProcessorClient(cfg.GRPCAddress, appLogger)
+	if err != nil {
+		appLogger.WithField("error", err).Fatal("Failed to connect to processor gRPC service")
+	}
+	defer processorClient.Close()
+
 	// Initialize handler
-	ghHandler := server.NewHandler(service, appLogger)
+	ghHandler := server.NewHandler(service, appLogger, processorClient)
 
 	// Setup routes
 	router := server.SetupRoutes(ghHandler)

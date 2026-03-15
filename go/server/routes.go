@@ -11,6 +11,7 @@ func SetupRoutes(handler *Handler) *mux.Router {
 	r.HandleFunc("/health", handler.HealthCheckHandler).Methods("GET")
 	r.HandleFunc("/remaining", handler.GetRemainingRequestsHandler).Methods("GET")
 	r.HandleFunc("/extract", handler.ExtractHandler).Methods("POST")
+	r.HandleFunc("/process", handler.ProcessHandler).Methods("POST")
 
 	// Swagger
 	r.PathPrefix("/swagger/").Handler(httpSwagger.WrapHandler)

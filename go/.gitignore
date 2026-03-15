@@ -29,3 +29,6 @@ output.csv
 
 # Log files
 *.log
+
+# gRPC generated files
+*.pb.go
