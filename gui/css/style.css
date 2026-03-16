@@ -41,8 +41,6 @@ header {
 }
 
 .header-bar {
-  max-width: 720px;
-  margin: 0 auto;
   padding: 1.25rem 1.5rem;
   display: flex;
   align-items: center;

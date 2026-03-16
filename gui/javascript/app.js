@@ -21,9 +21,14 @@ function playSound(audio) {
   audio.play().catch(() => {});
 }
 
-// Home button sound
-document.getElementById("home-btn").addEventListener("click", () => {
+// Home button: prevent navigation, play sound, then reset the page
+document.getElementById("home-btn").addEventListener("click", (e) => {
+  e.preventDefault();
   playSound(soundHome);
+  ownerInput.value = "";
+  repoInput.value = "";
+  hideResults();
+  hideError();
 });
 
 form.addEventListener("submit", async (e) => {
