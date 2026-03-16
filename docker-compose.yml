@@ -1,10 +1,30 @@
 name: "YOSHI-3"
-version: "3.8"
 
 services:
+  generator:
+    build:
+      context: .
+      dockerfile: generator.Dockerfile
+    volumes:
+      - .:/workspace
+
+  python:
+    build:
+      context: ./python
+    image: yoshi-py
+    container_name: YOSHI-3-python
+    ports:
+      - "50051:50051"
+    environment:
+      - PYTHONUNBUFFERED=1
+    depends_on:
+      generator:
+        condition: service_completed_successfully
+
   go:
     build:
-      context: ./go
+      context: .
+      dockerfile: go/Dockerfile
       args:
         # forwards build-arg if present; empty otherwise
         YOSHI_GH_TOKEN: ${YOSHI_GH_TOKEN:-}
@@ -17,13 +37,3 @@ services:
       - GRPC_ADDRESS=python:50051
     depends_on:
       - python
-
-  python:
-    build:
-      context: ./python
-    image: yoshi-py
-    container_name: YOSHI-3-python
-    ports:
-      - "50051:50051"
-    environment:
-      - PYTHONUNBUFFERED=1

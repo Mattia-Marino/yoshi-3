@@ -34,8 +34,8 @@ echo "  [Go] Done"
 echo "  [Python] Generating into $PY_OUT"
 mkdir -p "$PY_OUT"
 
-# Use the venv if available
-if [ -d "$SCRIPT_DIR/python/.venv" ] && [ -z "$VIRTUAL_ENV" ]; then
+# Use the Python venv only when a POSIX activation script is present.
+if [ -f "$SCRIPT_DIR/python/.venv/bin/activate" ] && [ -z "$VIRTUAL_ENV" ]; then
     source "$SCRIPT_DIR/python/.venv/bin/activate"
 fi
 
