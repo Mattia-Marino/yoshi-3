@@ -1,0 +1,257 @@
+/* ===== Reset & Base ===== */
+*,
+*::before,
+*::after {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+:root {
+  --green-dark: #2e7d32;
+  --green-mid: #43a047;
+  --green-light: #a5d6a7;
+  --green-pale: #e8f5e9;
+  --white: #ffffff;
+  --off-white: #f5f7f5;
+  --red: #d32f2f;
+  --red-light: #ffebee;
+  --text-dark: #212121;
+  --text-mid: #616161;
+  --border: #c8e6c9;
+  --shadow: rgba(0, 0, 0, 0.08);
+}
+
+html {
+  font-size: 16px;
+}
+
+body {
+  font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+  background: var(--off-white);
+  color: var(--text-dark);
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ===== Header ===== */
+header {
+  background: var(--green-dark);
+}
+
+.header-bar {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 1.25rem 1.5rem;
+  display: flex;
+  align-items: baseline;
+  gap: 1rem;
+}
+
+.header-bar h1 {
+  color: var(--white);
+  font-size: 1.5rem;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+
+.subtitle {
+  color: var(--green-light);
+  font-size: 0.875rem;
+}
+
+/* ===== Main ===== */
+main {
+  flex: 1;
+  max-width: 720px;
+  width: 100%;
+  margin: 2rem auto;
+  padding: 0 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+/* ===== Cards ===== */
+.card {
+  background: var(--white);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1.75rem;
+  box-shadow: 0 2px 8px var(--shadow);
+}
+
+.card h2 {
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: var(--green-dark);
+  margin-bottom: 1.25rem;
+}
+
+/* ===== Form ===== */
+.form-group {
+  margin-bottom: 1rem;
+}
+
+.form-group label {
+  display: block;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--text-mid);
+  margin-bottom: 0.35rem;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.form-group input {
+  width: 100%;
+  padding: 0.625rem 0.875rem;
+  font-size: 0.9375rem;
+  border: 1.5px solid var(--border);
+  border-radius: 6px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.form-group input:focus {
+  border-color: var(--green-mid);
+  box-shadow: 0 0 0 3px rgba(67, 160, 71, 0.15);
+}
+
+.form-group input::placeholder {
+  color: #b0bec5;
+}
+
+/* ===== Button ===== */
+button[type="submit"] {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+  padding: 0.65rem 2rem;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--white);
+  background: var(--green-mid);
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+button[type="submit"]:hover {
+  background: var(--green-dark);
+}
+
+button[type="submit"]:disabled {
+  background: var(--green-light);
+  cursor: not-allowed;
+}
+
+/* ===== Spinner ===== */
+.spinner {
+  width: 16px;
+  height: 16px;
+  border: 2.5px solid rgba(255, 255, 255, 0.35);
+  border-top-color: var(--white);
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ===== Metrics ===== */
+.metrics {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.metric {
+  display: grid;
+  grid-template-columns: 130px 1fr 60px;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.metric-label {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--text-mid);
+}
+
+.bar-wrapper {
+  height: 22px;
+  background: var(--green-pale);
+  border-radius: 11px;
+  overflow: hidden;
+}
+
+.bar {
+  height: 100%;
+  width: 0;
+  background: linear-gradient(90deg, var(--green-mid), var(--green-dark));
+  border-radius: 11px;
+  transition: width 0.8s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.metric-value {
+  font-size: 0.9375rem;
+  font-weight: 700;
+  color: var(--green-dark);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ===== Error Card ===== */
+.error-card {
+  background: var(--red-light);
+  border-color: var(--red);
+}
+
+.error-card p {
+  color: var(--red);
+  font-weight: 500;
+  font-size: 0.9375rem;
+}
+
+/* ===== Footer ===== */
+footer {
+  text-align: center;
+  padding: 1.25rem 1rem;
+  font-size: 0.75rem;
+  color: var(--text-mid);
+  border-top: 1px solid var(--border);
+}
+
+/* ===== Utility ===== */
+.hidden {
+  display: none !important;
+}
+
+/* ===== Responsive ===== */
+@media (max-width: 540px) {
+  .header-bar {
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+
+  .metric {
+    grid-template-columns: 1fr;
+    gap: 0.25rem;
+  }
+
+  .bar-wrapper {
+    width: 100%;
+  }
+
+  .metric-value {
+    text-align: left;
+  }
+}

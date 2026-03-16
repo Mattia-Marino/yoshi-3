@@ -37,3 +37,13 @@ services:
       - GRPC_ADDRESS=python:50051
     depends_on:
       - python
+
+  gui:
+    build:
+      context: ./gui
+    image: yoshi-gui
+    container_name: YOSHI-3-gui
+    ports:
+      - "8080:8080"
+    depends_on:
+      - go

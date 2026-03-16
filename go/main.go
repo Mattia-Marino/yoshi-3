@@ -78,8 +78,8 @@ func main() {
 	// Setup routes
 	router := server.SetupRoutes(ghHandler)
 
-	// Wrap router with logging middleware
-	handler := middleware.LoggingMiddleware(appLogger)(router)
+	// Wrap router with CORS and logging middleware
+	handler := middleware.CORSMiddleware(middleware.LoggingMiddleware(appLogger)(router))
 
 	srv := &http.Server{
 		Addr:         ":" + cfg.Port,
