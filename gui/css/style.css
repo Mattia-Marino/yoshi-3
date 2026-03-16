@@ -45,8 +45,30 @@ header {
   margin: 0 auto;
   padding: 1.25rem 1.5rem;
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 1rem;
+}
+
+.home-btn {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  transition: transform 0.2s;
+}
+
+.home-btn:hover {
+  transform: scale(1.1);
+}
+
+.home-btn img {
+  width: 44px;
+  height: 44px;
+  object-fit: contain;
+}
+
+.header-text {
+  display: flex;
+  flex-direction: column;
 }
 
 .header-bar h1 {
@@ -54,6 +76,7 @@ header {
   font-size: 1.5rem;
   font-weight: 700;
   letter-spacing: 0.5px;
+  line-height: 1.2;
 }
 
 .subtitle {

@@ -19,10 +19,12 @@ func main() {
 
 	mux := http.NewServeMux()
 
-	// Serve static assets (css/, javascript/)
+	// Serve static assets (css/, javascript/, images/, audio/)
 	fs := http.FileServer(http.Dir(staticDir))
 	mux.Handle("/css/", fs)
 	mux.Handle("/javascript/", fs)
+	mux.Handle("/images/", fs)
+	mux.Handle("/audio/", fs)
 
 	// Serve index.html for the root path
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {

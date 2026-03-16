@@ -10,7 +10,21 @@ const resultsCard = document.getElementById("results-card");
 const errorCard = document.getElementById("error-card");
 const errorMessage = document.getElementById("error-message");
 
+const soundHome = document.getElementById("sound-home");
+const soundEnter = document.getElementById("sound-enter");
+const soundError = document.getElementById("sound-error");
+
 const metrics = ["formality", "geodispersion", "longevity"];
+
+function playSound(audio) {
+  audio.currentTime = 0;
+  audio.play().catch(() => {});
+}
+
+// Home button sound
+document.getElementById("home-btn").addEventListener("click", () => {
+  playSound(soundHome);
+});
 
 form.addEventListener("submit", async (e) => {
   e.preventDefault();
@@ -19,6 +33,7 @@ form.addEventListener("submit", async (e) => {
   const repo = repoInput.value.trim();
   if (!owner || !repo) return;
 
+  playSound(soundEnter);
   setLoading(true);
   hideResults();
   hideError();
@@ -41,8 +56,10 @@ form.addEventListener("submit", async (e) => {
       throw new Error(data.error || `Request failed (${res.status})`);
     }
 
+    playSound(soundHome);
     showResults(data);
   } catch (err) {
+    playSound(soundError);
     showError(err.message);
   } finally {
     setLoading(false);

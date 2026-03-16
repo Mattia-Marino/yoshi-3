@@ -10,6 +10,8 @@ COPY --from=build /gui-server .
 COPY css/ css/
 COPY html/ html/
 COPY javascript/ javascript/
+COPY images/ images/
+COPY audio/ audio/
 ENV STATIC_DIR=/app
 EXPOSE 8080
 CMD ["./gui-server"]
