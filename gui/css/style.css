@@ -35,6 +35,65 @@ body {
   flex-direction: column;
 }
 
+.params-toggle-btn {
+  position: fixed;
+  top: 1rem;
+  left: 1rem;
+  width: 42px;
+  height: 42px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--white);
+  box-shadow: 0 2px 8px var(--shadow);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  cursor: pointer;
+  z-index: 1200;
+}
+
+.params-toggle-btn span {
+  width: 18px;
+  height: 2px;
+  background: var(--green-dark);
+  border-radius: 2px;
+}
+
+.params-drawer {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: min(280px, 85vw);
+  height: 100vh;
+  background: var(--white);
+  border-right: 1px solid var(--border);
+  box-shadow: 2px 0 10px var(--shadow);
+  padding: 1rem;
+  padding-top: 4.25rem;
+  transform: translateX(-100%);
+  transition: transform 0.25s ease;
+  z-index: 1100;
+}
+
+.params-drawer.open {
+  transform: translateX(0);
+}
+
+.params-drawer h2 {
+  font-size: 1rem;
+  color: var(--green-dark);
+  margin-bottom: 1rem;
+}
+
+.params-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.25);
+  z-index: 1000;
+}
+
 /* ===== Header ===== */
 header {
   background: var(--green-dark);
@@ -78,6 +137,7 @@ header {
   display: flex;
   align-items: center;
   flex-shrink: 0;
+  margin-left: 3rem;
   transition: transform 0.2s;
 }
 
@@ -285,9 +345,19 @@ footer {
 
 /* ===== Responsive ===== */
 @media (max-width: 540px) {
+  .params-toggle-btn {
+    top: 0.75rem;
+    left: 0.75rem;
+  }
+
   .header-bar {
     flex-direction: column;
     gap: 0.25rem;
+    padding-top: 3.5rem;
+  }
+
+  .home-btn {
+    margin-left: 0;
   }
 
   .requests-widget {

@@ -8,6 +8,36 @@
   <link rel="stylesheet" href="/css/style.css" />
 </head>
 <body>
+  <button
+    type="button"
+    id="params-toggle-btn"
+    class="params-toggle-btn"
+    aria-label="Toggle parameters menu"
+    aria-controls="params-drawer"
+    aria-expanded="false"
+  >
+    <span></span>
+    <span></span>
+    <span></span>
+  </button>
+
+  <aside id="params-drawer" class="params-drawer" aria-hidden="true">
+    <h2>Advanced Parameters</h2>
+    <div class="form-group">
+      <label for="min-commits">Min Commits</label>
+      <input type="number" id="min-commits" min="0" step="1" value="100" />
+    </div>
+    <div class="form-group">
+      <label for="days">Days</label>
+      <input type="number" id="days" min="0" step="1" value="90" />
+    </div>
+    <div class="form-group">
+      <label for="min-active">Min Active</label>
+      <input type="number" id="min-active" min="0" step="1" value="3" />
+    </div>
+  </aside>
+  <div id="params-overlay" class="params-overlay hidden" aria-hidden="true"></div>
+
   <header>
     <div class="header-bar">
       <a href="/" class="home-btn" id="home-btn">

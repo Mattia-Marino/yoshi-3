@@ -10,6 +10,12 @@ const resultsCard = document.getElementById("results-card");
 const errorCard = document.getElementById("error-card");
 const errorMessage = document.getElementById("error-message");
 const remainingRequestsEl = document.getElementById("remaining-requests");
+const paramsToggleBtn = document.getElementById("params-toggle-btn");
+const paramsDrawer = document.getElementById("params-drawer");
+const paramsOverlay = document.getElementById("params-overlay");
+const minCommitsInput = document.getElementById("min-commits");
+const daysInput = document.getElementById("days");
+const minActiveInput = document.getElementById("min-active");
 
 const soundHome = document.getElementById("sound-home");
 const soundEnter = document.getElementById("sound-enter");
@@ -17,6 +23,10 @@ const soundError = document.getElementById("sound-error");
 
 const metrics = ["formality", "geodispersion", "longevity"];
 let requestsRefreshInFlight = false;
+
+const DEFAULT_MIN_COMMITS = "100";
+const DEFAULT_DAYS = "90";
+const DEFAULT_MIN_ACTIVE = "3";
 
 function playSound(audio) {
   audio.currentTime = 0;
@@ -29,8 +39,19 @@ document.getElementById("home-btn").addEventListener("click", (e) => {
   playSound(soundHome);
   ownerInput.value = "";
   repoInput.value = "";
+  minCommitsInput.value = DEFAULT_MIN_COMMITS;
+  daysInput.value = DEFAULT_DAYS;
+  minActiveInput.value = DEFAULT_MIN_ACTIVE;
   hideResults();
   hideError();
+});
+
+paramsToggleBtn.addEventListener("click", toggleParamsDrawer);
+paramsOverlay.addEventListener("click", closeParamsDrawer);
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") {
+    closeParamsDrawer();
+  }
 });
 
 form.addEventListener("submit", async (e) => {
@@ -47,11 +68,21 @@ form.addEventListener("submit", async (e) => {
 
   try {
     let res;
+    const minCommits = parseNullableInt(minCommitsInput.value);
+    const days = parseNullableInt(daysInput.value);
+    const minActive = parseNullableInt(minActiveInput.value);
+
     try {
       res = await fetch(`${API_BASE}/process`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ owner, repo }),
+        body: JSON.stringify({
+          owner,
+          repo,
+          min_commits: minCommits,
+          days,
+          min_active: minActive,
+        }),
       });
     } catch (_) {
       throw new Error("Unable to reach the server. Is the backend running?");
@@ -112,6 +143,42 @@ function showError(msg) {
 
 function hideError() {
   errorCard.classList.add("hidden");
+}
+
+function toggleParamsDrawer() {
+  if (paramsDrawer.classList.contains("open")) {
+    closeParamsDrawer();
+  } else {
+    openParamsDrawer();
+  }
+}
+
+function openParamsDrawer() {
+  paramsDrawer.classList.add("open");
+  paramsOverlay.classList.remove("hidden");
+  paramsToggleBtn.setAttribute("aria-expanded", "true");
+  paramsDrawer.setAttribute("aria-hidden", "false");
+}
+
+function closeParamsDrawer() {
+  paramsDrawer.classList.remove("open");
+  paramsOverlay.classList.add("hidden");
+  paramsToggleBtn.setAttribute("aria-expanded", "false");
+  paramsDrawer.setAttribute("aria-hidden", "true");
+}
+
+function parseNullableInt(rawValue) {
+  const value = rawValue.trim();
+  if (value === "") {
+    return null;
+  }
+
+  const num = Number.parseInt(value, 10);
+  if (!Number.isFinite(num)) {
+    return null;
+  }
+
+  return num;
 }
 
 async function updateRemainingRequests() {
