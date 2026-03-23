@@ -15,8 +15,46 @@ import (
 
 // ExtractRequest represents the incoming HTTP request payload
 type ExtractRequest struct {
-	Owner string `json:"owner"`
-	Repo  string `json:"repo"`
+	Owner      string `json:"owner"`
+	Repo       string `json:"repo"`
+	MinCommits *int   `json:"min_commits,omitempty"`
+	Days       *int   `json:"days,omitempty"`
+	MinActive  *int   `json:"min_active,omitempty"`
+}
+
+const (
+	defaultMinCommits = 1
+	defaultDays       = 1000
+	defaultMinActive  = 1
+)
+
+func resolveEligibilityParams(req ExtractRequest) (int, int, int, error) {
+	minCommits := defaultMinCommits
+	days := defaultDays
+	minActive := defaultMinActive
+
+	if req.MinCommits != nil {
+		if *req.MinCommits <= 0 {
+			return 0, 0, 0, fmt.Errorf("min_commits must be greater than 0")
+		}
+		minCommits = *req.MinCommits
+	}
+
+	if req.Days != nil {
+		if *req.Days <= 0 {
+			return 0, 0, 0, fmt.Errorf("days must be greater than 0")
+		}
+		days = *req.Days
+	}
+
+	if req.MinActive != nil {
+		if *req.MinActive <= 0 {
+			return 0, 0, 0, fmt.Errorf("min_active must be greater than 0")
+		}
+		minActive = *req.MinActive
+	}
+
+	return minCommits, days, minActive, nil
 }
 
 // ExtractResponse represents the response containing repository information
@@ -117,11 +155,17 @@ func (h *Handler) ExtractHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	minCommits, days, minActive, err := resolveEligibilityParams(req)
+	if err != nil {
+		h.respondWithError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
 	// Use the client from the service
 	gh := h.service.ghClient
 
-	// Run fast eligibility checks first (100 commits, last 90 days, 3 active contributors)
-	ok, reason, err := gh.CheckRepoEligibility(req.Owner, req.Repo, 1, 1000, 1)
+	// Run eligibility checks using user-provided thresholds or defaults.
+	ok, reason, err := gh.CheckRepoEligibility(req.Owner, req.Repo, minCommits, days, minActive)
 	if err != nil {
 		h.logger.Errorf("Error checking eligibility for %s/%s: %v", req.Owner, req.Repo, err)
 		http.Error(w, "internal error checking repository eligibility: "+err.Error(), http.StatusInternalServerError)
@@ -202,6 +246,12 @@ func (h *Handler) ProcessHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	minCommits, days, minActive, err := resolveEligibilityParams(req)
+	if err != nil {
+		h.respondWithJSON(w, http.StatusBadRequest, ProcessHandlerResponse{Error: err.Error()})
+		return
+	}
+
 	if h.processorClient == nil {
 		h.respondWithJSON(w, http.StatusInternalServerError, ProcessHandlerResponse{Error: "processor service not configured"})
 		return
@@ -209,7 +259,7 @@ func (h *Handler) ProcessHandler(w http.ResponseWriter, r *http.Request) {
 
 	gh := h.service.ghClient
 
-	ok, reason, err := gh.CheckRepoEligibility(req.Owner, req.Repo, 1, 1000, 1)
+	ok, reason, err := gh.CheckRepoEligibility(req.Owner, req.Repo, minCommits, days, minActive)
 	if err != nil {
 		h.logger.Errorf("Error checking eligibility for %s/%s: %v", req.Owner, req.Repo, err)
 		h.respondWithJSON(w, http.StatusInternalServerError, ProcessHandlerResponse{Error: "internal error checking repository eligibility: " + err.Error()})
