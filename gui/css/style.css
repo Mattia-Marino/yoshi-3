@@ -47,6 +47,33 @@ header {
   gap: 1rem;
 }
 
+.requests-widget {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  background: rgba(255, 255, 255, 0.14);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 8px;
+  padding: 0.4rem 0.55rem;
+}
+
+.requests-label {
+  color: var(--green-pale);
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.2px;
+}
+
+.requests-value {
+  min-width: 4ch;
+  color: var(--white);
+  font-size: 0.95rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
 .home-btn {
   display: flex;
   align-items: center;
@@ -261,6 +288,10 @@ footer {
   .header-bar {
     flex-direction: column;
     gap: 0.25rem;
+  }
+
+  .requests-widget {
+    margin-left: 0;
   }
 
   .metric {

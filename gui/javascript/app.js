@@ -9,12 +9,14 @@ const spinner = submitBtn.querySelector(".spinner");
 const resultsCard = document.getElementById("results-card");
 const errorCard = document.getElementById("error-card");
 const errorMessage = document.getElementById("error-message");
+const remainingRequestsEl = document.getElementById("remaining-requests");
 
 const soundHome = document.getElementById("sound-home");
 const soundEnter = document.getElementById("sound-enter");
 const soundError = document.getElementById("sound-error");
 
 const metrics = ["formality", "geodispersion", "longevity"];
+let requestsRefreshInFlight = false;
 
 function playSound(audio) {
   audio.currentTime = 0;
@@ -71,6 +73,12 @@ form.addEventListener("submit", async (e) => {
   }
 });
 
+setInterval(() => {
+  updateRemainingRequests();
+}, 1000);
+
+updateRemainingRequests();
+
 function setLoading(loading) {
   submitBtn.disabled = loading;
   btnText.textContent = loading ? "Processing\u2026" : "Process";
@@ -104,4 +112,33 @@ function showError(msg) {
 
 function hideError() {
   errorCard.classList.add("hidden");
+}
+
+async function updateRemainingRequests() {
+  if (requestsRefreshInFlight) {
+    return;
+  }
+
+  requestsRefreshInFlight = true;
+
+  try {
+    const res = await fetch(`${API_BASE}/remaining`);
+    if (!res.ok) {
+      throw new Error(`Request failed (${res.status})`);
+    }
+
+    const data = await res.json();
+    const remaining = Number(data.remaining);
+
+    if (!Number.isFinite(remaining)) {
+      throw new Error("Invalid remaining requests value");
+    }
+
+    remainingRequestsEl.textContent = Math.max(0, Math.floor(remaining)).toString();
+  } catch (_) {
+    // Keep the widget non-intrusive: show placeholder on errors.
+    remainingRequestsEl.textContent = "--";
+  } finally {
+    requestsRefreshInFlight = false;
+  }
 }

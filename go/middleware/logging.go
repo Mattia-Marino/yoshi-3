@@ -35,7 +35,7 @@ func LoggingMiddleware(logger *logrus.Logger) func(http.Handler) http.Handler {
 			// If the request is for health or readiness checks, only log them when
 			// the logger is set to Debug (or more verbose). This avoids noisy logs
 			// from frequent probes at higher log levels.
-			if r.URL.Path == "/health" || r.URL.Path == "/ready" {
+			if r.URL.Path == "/health" || r.URL.Path == "/ready" || r.URL.Path == "/remaining" {
 				// Prefer the helper when available; fall back to numeric level check
 				// for older logrus versions.
 				if !logger.IsLevelEnabled(logrus.DebugLevel) {
