@@ -6,6 +6,7 @@ import (
 	"math"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -284,6 +285,22 @@ func (c *Client) GetRepositoryInfo(owner, repo string) models.RepositoryInfo {
 			info.Contributors = nil
 			info.ContributorsWithLocationCount = 0
 		} else {
+			communityFollowers, communityFollowing, followGraphErr := c.getCommunityFollowCounts(targetContributors)
+			if followGraphErr != nil {
+				c.logger.Warnf("Failed to fetch full community follow graph for %s/%s: %v", owner, repo, followGraphErr)
+			}
+
+			for i := range details {
+				loginKey := strings.ToLower(details[i].Login)
+				details[i].Followers = communityFollowers[loginKey]
+				details[i].Following = communityFollowing[loginKey]
+				if details[i].Following > 0 {
+					details[i].FollowerFollowingRatio = float64(details[i].Followers) / float64(details[i].Following)
+				} else {
+					details[i].FollowerFollowingRatio = 0
+				}
+			}
+
 			// Filter contributors with location
 			var withLocation []models.ContributorDetail
 			for _, d := range details {
@@ -681,6 +698,90 @@ func (c *Client) getContributorsDetails(usernames []string) ([]models.Contributo
 	}
 
 	return results, nil
+}
+
+// getCommunityFollowCounts computes followers/following counts restricted to the provided community.
+// It scans each member's following list and keeps only edges between members of the same community.
+func (c *Client) getCommunityFollowCounts(usernames []string) (map[string]int, map[string]int, error) {
+	community := make(map[string]struct{}, len(usernames))
+	followersCount := make(map[string]int, len(usernames))
+	followingCount := make(map[string]int, len(usernames))
+
+	for _, u := range usernames {
+		key := strings.ToLower(u)
+		community[key] = struct{}{}
+		followersCount[key] = 0
+		followingCount[key] = 0
+	}
+
+	if len(community) == 0 {
+		return followersCount, followingCount, nil
+	}
+
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, 5)
+	var mu sync.Mutex
+	failed := 0
+
+	for _, username := range usernames {
+		u := username
+		wg.Add(1)
+		sem <- struct{}{}
+
+		go func() {
+			defer wg.Done()
+			defer func() { <-sem }()
+
+			selfKey := strings.ToLower(u)
+			seenCommunityFollowees := make(map[string]struct{})
+
+			opts := &gith.ListOptions{PerPage: 100}
+			for {
+				following, resp, err := c.client.Users.ListFollowing(c.ctx, u, opts)
+				if err != nil {
+					c.logger.Debugf("Failed to fetch following list for %s: %v", u, err)
+					mu.Lock()
+					failed++
+					mu.Unlock()
+					return
+				}
+
+				for _, followedUser := range following {
+					if followedUser.Login == nil {
+						continue
+					}
+
+					targetKey := strings.ToLower(*followedUser.Login)
+					if targetKey == selfKey {
+						continue
+					}
+					if _, ok := community[targetKey]; ok {
+						seenCommunityFollowees[targetKey] = struct{}{}
+					}
+				}
+
+				if resp == nil || resp.NextPage == 0 {
+					break
+				}
+				opts.Page = resp.NextPage
+			}
+
+			mu.Lock()
+			followingCount[selfKey] = len(seenCommunityFollowees)
+			for targetKey := range seenCommunityFollowees {
+				followersCount[targetKey]++
+			}
+			mu.Unlock()
+		}()
+	}
+
+	wg.Wait()
+
+	if failed == len(usernames) && len(usernames) > 0 {
+		return followersCount, followingCount, fmt.Errorf("failed to fetch community following lists for all contributors")
+	}
+
+	return followersCount, followingCount, nil
 }
 
 // getAllCommits fetches commits from a repository with an optional limit
