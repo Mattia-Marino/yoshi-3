@@ -18,7 +18,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'generated'))
 
 import processor_pb2
 import processor_pb2_grpc
-from calculators import FormalityCalculator, GeodispersionCalculator, LongevityCalculator
+from calculators import CohesionCalculator, FormalityCalculator, GeodispersionCalculator, LongevityCalculator
 
 # Logger will be configured in main
 logger = logging.getLogger(__name__)
@@ -78,6 +78,9 @@ class ProcessorServicer(processor_pb2_grpc.ProcessorServiceServicer):
                     "bio": contributor.bio,
                     "created_at": contributor.created_at,
                     "updated_at": contributor.updated_at,
+                    "followers": contributor.followers,
+                    "following": contributor.following,
+                    "follower_following_ratio": contributor.follower_following_ratio,
                 })
             
             # Convert contributor_stats from proto to dict list
@@ -143,19 +146,24 @@ class ProcessorServicer(processor_pb2_grpc.ProcessorServiceServicer):
             # Compute longevity metric
             longevity_score = LongevityCalculator.compute(repo_data)
             logger.info(f"Computed longevity score: {longevity_score}")
+
+            # Compute cohesion metric
+            cohesion_score = CohesionCalculator.compute(repo_data)
+            logger.info(f"Computed cohesion score: {cohesion_score}")
             
             # Return response with all metrics
             return processor_pb2.ProcessResponse(
                 formality=formality_score,
                 geodispersion=geodispersion_score,
-                longevity=longevity_score
+                longevity=longevity_score,
+                cohesion=cohesion_score
             )
             
         except Exception as e:
             logger.error(f"Processing error: {str(e)}", exc_info=True)
             context.set_code(grpc.StatusCode.INTERNAL)
             context.set_details(f"Processing error: {str(e)}")
-            return processor_pb2.ProcessResponse(formality=0.0, geodispersion=0.0, longevity=0.0)
+            return processor_pb2.ProcessResponse(formality=0.0, geodispersion=0.0, longevity=0.0, cohesion=0.0)
 
 
 def serve(log_level=logging.INFO):
