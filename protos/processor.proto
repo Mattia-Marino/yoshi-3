@@ -62,6 +62,9 @@ message Contributor {
     string bio = 12;
     string created_at = 13;
     string updated_at = 14;
+    int32 followers = 15;
+    int32 following = 16;
+    double follower_following_ratio = 17;
 }
 
 // Repository data for processing
@@ -112,4 +115,5 @@ message ProcessResponse {
     double formality = 1;
     double geodispersion = 2;
     double longevity = 3;
+    double cohesion = 4;
 }
