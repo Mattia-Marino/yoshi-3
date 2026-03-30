@@ -534,6 +534,12 @@ button[type="submit"]:disabled {
   font-size: 0.9rem;
   font-weight: 700;
   color: var(--green-dark);
+  margin-bottom: 0.35rem;
+}
+
+.decision-guide {
+  color: var(--text-mid);
+  font-size: 0.78rem;
   margin-bottom: 0.7rem;
 }
 
@@ -575,6 +581,18 @@ button[type="submit"]:disabled {
 }
 
 .decision-badge.false {
+  background: #fff3e0;
+  color: #ef6c00;
+  border: 1px solid #ffe0b2;
+}
+
+.decision-badge.low {
+  background: #e8f5e9;
+  color: var(--green-dark);
+  border: 1px solid #c8e6c9;
+}
+
+.decision-badge.high {
   background: #fff3e0;
   color: #ef6c00;
   border: 1px solid #ffe0b2;

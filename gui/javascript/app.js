@@ -249,11 +249,11 @@ function classifyCommunity(data) {
   const steps = [];
 
   const geodispersionLow = geodispersion < thresholds.geodispersion;
-  steps.push(createDecisionStep("Geodispersion", geodispersion, thresholds.geodispersion, geodispersionLow, "Low geodispersion", "High geodispersion"));
+  steps.push(createDecisionStep("Geodispersion", geodispersion, thresholds.geodispersion, geodispersionLow, "Community of Practice (CoP)", "Network of Practice (NoP)"));
 
   if (geodispersionLow) {
     const formalityLow = formality < thresholds.formality;
-    steps.push(createDecisionStep("Formality", formality, thresholds.formality, formalityLow, "Informal community branch", "Formal community branch"));
+    steps.push(createDecisionStep("Formality", formality, thresholds.formality, formalityLow, "Informal Community (IC)", "Formal Community (FC)"));
 
     if (formalityLow) {
       return {
@@ -263,7 +263,7 @@ function classifyCommunity(data) {
     }
 
     const longevityLow = longevity < thresholds.longevity;
-    steps.push(createDecisionStep("Longevity", longevity, thresholds.longevity, longevityLow, "Project team branch", "High longevity branch"));
+    steps.push(createDecisionStep("Longevity", longevity, thresholds.longevity, longevityLow, "Project Team (PT)", "Go to Cohesion node"));
 
     if (longevityLow) {
       return {
@@ -273,7 +273,7 @@ function classifyCommunity(data) {
     }
 
     const cohesionLow = cohesion < thresholds.cohesion;
-    steps.push(createDecisionStep("Cohesion", cohesion, thresholds.cohesion, cohesionLow, "Strategic community branch", "Workgroup branch"));
+    steps.push(createDecisionStep("Cohesion", cohesion, thresholds.cohesion, cohesionLow, "Strategic Community (SC)", "Workgroup (WG)"));
 
     if (cohesionLow) {
       return {
@@ -289,7 +289,7 @@ function classifyCommunity(data) {
   }
 
   const formalityLow = formality < thresholds.formality;
-  steps.push(createDecisionStep("Formality", formality, thresholds.formality, formalityLow, "Informal network branch", "Formal network branch"));
+  steps.push(createDecisionStep("Formality", formality, thresholds.formality, formalityLow, "Informal Network (IN)", "Formal Network (FN)"));
 
   if (formalityLow) {
     return {
@@ -348,33 +348,40 @@ function normalizeThreshold(rawValue, fallbackValue) {
   return num;
 }
 
-function createDecisionStep(metricLabel, metricValue, threshold, conditionResult, trueBranch, falseBranch) {
+function createDecisionStep(metricLabel, metricValue, threshold, conditionResult, lowBranch, highBranch) {
   return {
     metricLabel,
     metricValue,
     threshold,
     conditionResult,
-    branch: conditionResult ? trueBranch : falseBranch,
+    branch: conditionResult ? lowBranch : highBranch,
+    levelLabel: conditionResult ? "LOW" : "HIGH",
+    levelClass: conditionResult ? "low" : "high",
   };
 }
 
 function renderDecisionSteps(steps, category) {
   decisionStepsEl.innerHTML = "";
 
+  const startItem = document.createElement("li");
+  startItem.className = "decision-step";
+  startItem.textContent = "Start node from map: Geodispersion";
+  decisionStepsEl.appendChild(startItem);
+
   steps.forEach((step) => {
     const listItem = document.createElement("li");
     listItem.className = "decision-step";
 
     const mainText = document.createElement("span");
-    mainText.textContent = `${step.metricLabel}: ${step.metricValue.toFixed(4)} < ${step.threshold.toFixed(4)} => `;
+    mainText.textContent = `${step.metricLabel} node: ${step.metricValue.toFixed(4)} < ${step.threshold.toFixed(4)} => `;
 
     const badge = document.createElement("span");
-    badge.className = `decision-badge ${step.conditionResult ? "true" : "false"}`;
-    badge.textContent = step.conditionResult ? "true" : "false";
+    badge.className = `decision-badge ${step.levelClass}`;
+    badge.textContent = step.levelLabel;
 
     const branchText = document.createElement("span");
     branchText.className = "decision-branch";
-    branchText.textContent = ` (${step.branch})`;
+    branchText.textContent = ` -> ${step.branch}`;
 
     listItem.append(mainText, badge, branchText);
     decisionStepsEl.appendChild(listItem);
@@ -382,7 +389,7 @@ function renderDecisionSteps(steps, category) {
 
   const finalItem = document.createElement("li");
   finalItem.className = "decision-step decision-final";
-  finalItem.textContent = `Category selected: ${category}`;
+  finalItem.textContent = `Final category from map path: ${category}`;
   decisionStepsEl.appendChild(finalItem);
 }
 
