@@ -45,20 +45,23 @@ func RepositoryInfoToProto(info models.RepositoryInfo) *Repository {
 	// Map contributors
 	for _, c := range info.Contributors {
 		repo.Contributors = append(repo.Contributors, &Contributor{
-			Login:     c.Login,
-			Id:        int32(c.ID),
-			NodeId:    c.NodeID,
-			AvatarUrl: c.AvatarURL,
-			HtmlUrl:   c.HTMLURL,
-			Type:      c.Type,
-			Name:      c.Name,
-			Company:   c.Company,
-			Blog:      c.Blog,
-			Location:  c.Location,
-			Email:     c.Email,
-			Bio:       c.Bio,
-			CreatedAt: c.CreatedAt.Format(time.RFC3339),
-			UpdatedAt: c.UpdatedAt.Format(time.RFC3339),
+			Login:                  c.Login,
+			Id:                     int32(c.ID),
+			NodeId:                 c.NodeID,
+			AvatarUrl:              c.AvatarURL,
+			HtmlUrl:                c.HTMLURL,
+			Type:                   c.Type,
+			Name:                   c.Name,
+			Company:                c.Company,
+			Blog:                   c.Blog,
+			Location:               c.Location,
+			Email:                  c.Email,
+			Bio:                    c.Bio,
+			Followers:              int32(c.Followers),
+			Following:              int32(c.Following),
+			FollowerFollowingRatio: c.FollowerFollowingRatio,
+			CreatedAt:              c.CreatedAt.Format(time.RFC3339),
+			UpdatedAt:              c.UpdatedAt.Format(time.RFC3339),
 		})
 	}
 

@@ -210,6 +210,7 @@ type ProcessHandlerResponse struct {
 	Formality     float64 `json:"formality"`
 	Geodispersion float64 `json:"geodispersion"`
 	Longevity     float64 `json:"longevity"`
+	Cohesion      float64 `json:"cohesion"`
 	Error         string  `json:"error,omitempty"`
 }
 
@@ -293,5 +294,6 @@ func (h *Handler) ProcessHandler(w http.ResponseWriter, r *http.Request) {
 		Formality:     metrics.Formality,
 		Geodispersion: metrics.Geodispersion,
 		Longevity:     metrics.Longevity,
+		Cohesion:      metrics.Cohesion,
 	})
 }

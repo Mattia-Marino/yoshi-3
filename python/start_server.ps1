@@ -3,11 +3,11 @@ PowerShell script to start the gRPC server
 Usage: .\start_server.ps1 [-Foreground]
 #>
 
-$ErrorActionPreference = 'Stop'
-
 param(
     [switch]$Foreground
 )
+
+$ErrorActionPreference = 'Stop'
 
 Write-Host "Starting gRPC server..." -ForegroundColor Cyan
 
@@ -48,8 +48,9 @@ if ($Foreground) {
 } else {
     Write-Host "Starting gRPC server in background..." -ForegroundColor Green
     $log = Join-Path $PSScriptRoot "server.log"
+    $errLog = Join-Path $PSScriptRoot "server.err.log"
     try {
-        $proc = Start-Process -FilePath python -ArgumentList 'app.py' -RedirectStandardOutput $log -RedirectStandardError $log -WindowStyle Hidden -PassThru
+        $proc = Start-Process -FilePath python -ArgumentList 'app.py' -RedirectStandardOutput $log -RedirectStandardError $errLog -WindowStyle Hidden -PassThru
         Start-Sleep -Seconds 1
         $check = Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -and $_.CommandLine -match 'python' -and $_.CommandLine -match 'app.py' }
         if ($check) {

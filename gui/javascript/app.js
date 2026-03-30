@@ -21,7 +21,7 @@ const soundHome = document.getElementById("sound-home");
 const soundEnter = document.getElementById("sound-enter");
 const soundError = document.getElementById("sound-error");
 
-const metrics = ["formality", "geodispersion", "longevity"];
+const metrics = ["formality", "geodispersion", "longevity", "cohesion"];
 let requestsRefreshInFlight = false;
 
 const DEFAULT_MIN_COMMITS = "100";

@@ -42,6 +42,7 @@ type ProcessResult struct {
 	Formality     float64 `json:"formality"`
 	Geodispersion float64 `json:"geodispersion"`
 	Longevity     float64 `json:"longevity"`
+	Cohesion      float64 `json:"cohesion"`
 }
 
 // Process sends repository data to the ProcessorService and returns computed metrics.
@@ -62,6 +63,7 @@ func (pc *ProcessorClient) Process(ctx context.Context, repoProto *pb.Repository
 		Formality:     resp.Formality,
 		Geodispersion: resp.Geodispersion,
 		Longevity:     resp.Longevity,
+		Cohesion:      resp.Cohesion,
 	}, nil
 }
 
