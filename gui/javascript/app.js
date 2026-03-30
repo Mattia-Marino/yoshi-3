@@ -6,9 +6,7 @@ const repoInput = document.getElementById("repo");
 const submitBtn = document.getElementById("submit-btn");
 const btnText = submitBtn.querySelector(".btn-text");
 const spinner = submitBtn.querySelector(".spinner");
-const mainContent = document.getElementById("main-content");
 const resultsCard = document.getElementById("results-card");
-const analysisRightPanel = document.getElementById("analysis-right-panel");
 const errorCard = document.getElementById("error-card");
 const errorMessage = document.getElementById("error-message");
 const remainingRequestsEl = document.getElementById("remaining-requests");
@@ -18,8 +16,20 @@ const paramsOverlay = document.getElementById("params-overlay");
 const minCommitsInput = document.getElementById("min-commits");
 const daysInput = document.getElementById("days");
 const minActiveInput = document.getElementById("min-active");
+const thresholdGeodispersionInput = document.getElementById("threshold-geodispersion");
+const thresholdFormalityInput = document.getElementById("threshold-formality");
+const thresholdLongevityInput = document.getElementById("threshold-longevity");
+const thresholdCohesionInput = document.getElementById("threshold-cohesion");
+const thresholdGeodispersionValueEl = document.getElementById("threshold-geodispersion-value");
+const thresholdFormalityValueEl = document.getElementById("threshold-formality-value");
+const thresholdLongevityValueEl = document.getElementById("threshold-longevity-value");
+const thresholdCohesionValueEl = document.getElementById("threshold-cohesion-value");
 const categoryValueEl = document.getElementById("val-category");
 const decisionStepsEl = document.getElementById("decision-steps");
+const mapZoomTrigger = document.getElementById("map-zoom-trigger");
+const mapModal = document.getElementById("map-modal");
+const mapModalBackdrop = document.getElementById("map-modal-backdrop");
+const mapModalClose = document.getElementById("map-modal-close");
 
 const soundHome = document.getElementById("sound-home");
 const soundEnter = document.getElementById("sound-enter");
@@ -32,13 +42,27 @@ const DEFAULT_MIN_COMMITS = "100";
 const DEFAULT_DAYS = "90";
 const DEFAULT_MIN_ACTIVE = "3";
 
-// Decision tree thresholds: edit these values to adjust category boundaries.
-const COMMUNITY_THRESHOLDS = {
-  geodispersion: 0.5,
-  formality: 0.5,
-  longevity: 0.5,
-  cohesion: 0.5,
+const DEFAULT_COMMUNITY_THRESHOLDS = {
+  geodispersion: "0.50",
+  formality: "0.50",
+  longevity: "0.50",
+  cohesion: "0.50",
 };
+
+const thresholdControls = [
+  { slider: thresholdGeodispersionInput, valueEl: thresholdGeodispersionValueEl },
+  { slider: thresholdFormalityInput, valueEl: thresholdFormalityValueEl },
+  { slider: thresholdLongevityInput, valueEl: thresholdLongevityValueEl },
+  { slider: thresholdCohesionInput, valueEl: thresholdCohesionValueEl },
+];
+
+thresholdControls.forEach((control) => {
+  control.slider.addEventListener("input", () => {
+    syncThresholdSlider(control);
+  });
+});
+
+syncThresholdSliders();
 
 function playSound(audio) {
   audio.currentTime = 0;
@@ -54,15 +78,24 @@ document.getElementById("home-btn").addEventListener("click", (e) => {
   minCommitsInput.value = DEFAULT_MIN_COMMITS;
   daysInput.value = DEFAULT_DAYS;
   minActiveInput.value = DEFAULT_MIN_ACTIVE;
+  thresholdGeodispersionInput.value = DEFAULT_COMMUNITY_THRESHOLDS.geodispersion;
+  thresholdFormalityInput.value = DEFAULT_COMMUNITY_THRESHOLDS.formality;
+  thresholdLongevityInput.value = DEFAULT_COMMUNITY_THRESHOLDS.longevity;
+  thresholdCohesionInput.value = DEFAULT_COMMUNITY_THRESHOLDS.cohesion;
+  syncThresholdSliders();
   hideResults();
   hideError();
 });
 
 paramsToggleBtn.addEventListener("click", toggleParamsDrawer);
 paramsOverlay.addEventListener("click", closeParamsDrawer);
+mapZoomTrigger.addEventListener("click", openMapModal);
+mapModalBackdrop.addEventListener("click", closeMapModal);
+mapModalClose.addEventListener("click", closeMapModal);
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
     closeParamsDrawer();
+    closeMapModal();
   }
 });
 
@@ -146,14 +179,10 @@ function showResults(data) {
   renderDecisionSteps(decisionResult.steps, decisionResult.category);
 
   resultsCard.classList.remove("hidden");
-  analysisRightPanel.classList.remove("hidden");
-  mainContent.classList.add("analysis-mode");
 }
 
 function hideResults() {
   resultsCard.classList.add("hidden");
-  analysisRightPanel.classList.add("hidden");
-  mainContent.classList.remove("analysis-mode");
 }
 
 function showError(msg) {
@@ -187,6 +216,16 @@ function closeParamsDrawer() {
   paramsDrawer.setAttribute("aria-hidden", "true");
 }
 
+function openMapModal() {
+  mapModal.classList.remove("hidden");
+  mapModal.setAttribute("aria-hidden", "false");
+}
+
+function closeMapModal() {
+  mapModal.classList.add("hidden");
+  mapModal.setAttribute("aria-hidden", "true");
+}
+
 function parseNullableInt(rawValue) {
   const value = rawValue.trim();
   if (value === "") {
@@ -206,14 +245,15 @@ function classifyCommunity(data) {
   const formality = Number(data.formality ?? 0);
   const longevity = Number(data.longevity ?? 0);
   const cohesion = Number(data.cohesion ?? 0);
+  const thresholds = getCommunityThresholds();
   const steps = [];
 
-  const geodispersionLow = geodispersion < COMMUNITY_THRESHOLDS.geodispersion;
-  steps.push(createDecisionStep("Geodispersion", geodispersion, COMMUNITY_THRESHOLDS.geodispersion, geodispersionLow, "Low geodispersion", "High geodispersion"));
+  const geodispersionLow = geodispersion < thresholds.geodispersion;
+  steps.push(createDecisionStep("Geodispersion", geodispersion, thresholds.geodispersion, geodispersionLow, "Low geodispersion", "High geodispersion"));
 
   if (geodispersionLow) {
-    const formalityLow = formality < COMMUNITY_THRESHOLDS.formality;
-    steps.push(createDecisionStep("Formality", formality, COMMUNITY_THRESHOLDS.formality, formalityLow, "Informal community branch", "Formal community branch"));
+    const formalityLow = formality < thresholds.formality;
+    steps.push(createDecisionStep("Formality", formality, thresholds.formality, formalityLow, "Informal community branch", "Formal community branch"));
 
     if (formalityLow) {
       return {
@@ -222,8 +262,8 @@ function classifyCommunity(data) {
       };
     }
 
-    const longevityLow = longevity < COMMUNITY_THRESHOLDS.longevity;
-    steps.push(createDecisionStep("Longevity", longevity, COMMUNITY_THRESHOLDS.longevity, longevityLow, "Project team branch", "High longevity branch"));
+    const longevityLow = longevity < thresholds.longevity;
+    steps.push(createDecisionStep("Longevity", longevity, thresholds.longevity, longevityLow, "Project team branch", "High longevity branch"));
 
     if (longevityLow) {
       return {
@@ -232,8 +272,8 @@ function classifyCommunity(data) {
       };
     }
 
-    const cohesionLow = cohesion < COMMUNITY_THRESHOLDS.cohesion;
-    steps.push(createDecisionStep("Cohesion", cohesion, COMMUNITY_THRESHOLDS.cohesion, cohesionLow, "Strategic community branch", "Workgroup branch"));
+    const cohesionLow = cohesion < thresholds.cohesion;
+    steps.push(createDecisionStep("Cohesion", cohesion, thresholds.cohesion, cohesionLow, "Strategic community branch", "Workgroup branch"));
 
     if (cohesionLow) {
       return {
@@ -248,8 +288,8 @@ function classifyCommunity(data) {
     };
   }
 
-  const formalityLow = formality < COMMUNITY_THRESHOLDS.formality;
-  steps.push(createDecisionStep("Formality", formality, COMMUNITY_THRESHOLDS.formality, formalityLow, "Informal network branch", "Formal network branch"));
+  const formalityLow = formality < thresholds.formality;
+  steps.push(createDecisionStep("Formality", formality, thresholds.formality, formalityLow, "Informal network branch", "Formal network branch"));
 
   if (formalityLow) {
     return {
@@ -262,6 +302,50 @@ function classifyCommunity(data) {
     category: "Formal Network (FN)",
     steps,
   };
+}
+
+function getCommunityThresholds() {
+  return {
+    geodispersion: parseThresholdValue(thresholdGeodispersionInput.value, DEFAULT_COMMUNITY_THRESHOLDS.geodispersion),
+    formality: parseThresholdValue(thresholdFormalityInput.value, DEFAULT_COMMUNITY_THRESHOLDS.formality),
+    longevity: parseThresholdValue(thresholdLongevityInput.value, DEFAULT_COMMUNITY_THRESHOLDS.longevity),
+    cohesion: parseThresholdValue(thresholdCohesionInput.value, DEFAULT_COMMUNITY_THRESHOLDS.cohesion),
+  };
+}
+
+function parseThresholdValue(rawValue, fallbackValue) {
+  return normalizeThreshold(rawValue, fallbackValue);
+}
+
+function syncThresholdSliders() {
+  thresholdControls.forEach((control) => {
+    syncThresholdSlider(control);
+  });
+}
+
+function syncThresholdSlider(control) {
+  const normalized = normalizeThreshold(control.slider.value, "0.50");
+  const formatted = normalized.toFixed(2);
+  control.slider.value = formatted;
+  control.valueEl.textContent = formatted;
+}
+
+function normalizeThreshold(rawValue, fallbackValue) {
+  const normalizedRawValue = String(rawValue).trim().replace(",", ".");
+  const num = Number.parseFloat(normalizedRawValue);
+  if (!Number.isFinite(num)) {
+    return Number.parseFloat(fallbackValue);
+  }
+
+  if (num < 0) {
+    return 0;
+  }
+
+  if (num > 1) {
+    return 1;
+  }
+
+  return num;
 }
 
 function createDecisionStep(metricLabel, metricValue, threshold, conditionResult, trueBranch, falseBranch) {

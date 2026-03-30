@@ -35,6 +35,38 @@
       <label for="min-active">Min Active</label>
       <input type="number" id="min-active" min="0" step="1" value="3" />
     </div>
+
+    <details class="params-submenu" open>
+      <summary>Threshold Parameters</summary>
+      <div class="form-group">
+        <label for="threshold-geodispersion">Geodispersion Threshold</label>
+        <div class="threshold-control">
+          <input type="range" id="threshold-geodispersion" min="0" max="1" step="0.01" value="0.50" />
+          <span class="threshold-value" id="threshold-geodispersion-value">0.50</span>
+        </div>
+      </div>
+      <div class="form-group">
+        <label for="threshold-formality">Formality Threshold</label>
+        <div class="threshold-control">
+          <input type="range" id="threshold-formality" min="0" max="1" step="0.01" value="0.50" />
+          <span class="threshold-value" id="threshold-formality-value">0.50</span>
+        </div>
+      </div>
+      <div class="form-group">
+        <label for="threshold-longevity">Longevity Threshold</label>
+        <div class="threshold-control">
+          <input type="range" id="threshold-longevity" min="0" max="1" step="0.01" value="0.50" />
+          <span class="threshold-value" id="threshold-longevity-value">0.50</span>
+        </div>
+      </div>
+      <div class="form-group">
+        <label for="threshold-cohesion">Cohesion Threshold</label>
+        <div class="threshold-control">
+          <input type="range" id="threshold-cohesion" min="0" max="1" step="0.01" value="0.50" />
+          <span class="threshold-value" id="threshold-cohesion-value">0.50</span>
+        </div>
+      </div>
+    </details>
   </aside>
   <div id="params-overlay" class="params-overlay hidden" aria-hidden="true"></div>
 
@@ -138,18 +170,30 @@
         </section>
       </div>
 
-      <aside class="analysis-right hidden" id="analysis-right-panel">
+      <aside class="analysis-right" id="analysis-right-panel">
         <section class="card yoshi-image-card">
           <h2>YOSHI-3 Decision Map</h2>
-          <img src="/images/YOSHI-3.drawio.png" alt="YOSHI-3 decision tree" class="yoshi-decision-image" />
+          <button type="button" class="map-zoom-trigger" id="map-zoom-trigger" aria-label="Open enlarged decision map">
+            <img src="/images/YOSHI-3.drawio.png" alt="YOSHI-3 decision tree" class="yoshi-decision-image" />
+          </button>
         </section>
         <section class="card decision-tree" id="decision-tree-wrapper">
           <h3>Decision Tree Path</h3>
-          <ol class="decision-steps" id="decision-steps"></ol>
+          <ol class="decision-steps" id="decision-steps">
+            <li class="decision-step">Run an analysis to see the evaluated path.</li>
+          </ol>
         </section>
       </aside>
     </div>
   </main>
+
+  <div class="map-modal hidden" id="map-modal" aria-hidden="true" role="dialog" aria-label="Enlarged decision map">
+    <div class="map-modal-backdrop" id="map-modal-backdrop"></div>
+    <div class="map-modal-content">
+      <button type="button" class="map-modal-close" id="map-modal-close" aria-label="Close enlarged map">Close</button>
+      <img src="/images/YOSHI-3.drawio.png" alt="YOSHI-3 decision tree enlarged" class="map-modal-image" />
+    </div>
+  </div>
 
   <footer>
     <p>YOSHI-3 &mdash; Yielding Open-Source Health Information</p>
