@@ -59,77 +59,96 @@
   <audio id="sound-enter" src="/audio/yoshi_enter.mp3" preload="auto"></audio>
   <audio id="sound-error" src="/audio/yoshi_error.mp3" preload="auto"></audio>
 
-  <main>
-    <!-- Input Card -->
-    <section class="card input-card">
-      <h2>Analyze a Repository</h2>
-      <form id="process-form">
-        <div class="form-group">
-          <label for="owner">Owner</label>
-          <input
-            type="text"
-            id="owner"
-            name="owner"
-            placeholder="e.g. traefik"
-            required
-          />
-        </div>
-        <div class="form-group">
-          <label for="repo">Repository</label>
-          <input
-            type="text"
-            id="repo"
-            name="repo"
-            placeholder="e.g. traefik"
-            required
-          />
-        </div>
-        <button type="submit" id="submit-btn">
-          <span class="btn-text">Process</span>
-          <span class="spinner hidden"></span>
-        </button>
-      </form>
-    </section>
+  <main id="main-content">
+    <div class="analysis-layout">
+      <div class="analysis-left">
+        <!-- Input Card -->
+        <section class="card input-card">
+          <h2>Analyze a Repository</h2>
+          <form id="process-form">
+            <div class="form-group">
+              <label for="owner">Owner</label>
+              <input
+                type="text"
+                id="owner"
+                name="owner"
+                placeholder="e.g. traefik"
+                required
+              />
+            </div>
+            <div class="form-group">
+              <label for="repo">Repository</label>
+              <input
+                type="text"
+                id="repo"
+                name="repo"
+                placeholder="e.g. traefik"
+                required
+              />
+            </div>
+            <button type="submit" id="submit-btn">
+              <span class="btn-text">Process</span>
+              <span class="spinner hidden"></span>
+            </button>
+          </form>
+        </section>
 
-    <!-- Results Card (hidden until response) -->
-    <section class="card results-card hidden" id="results-card">
-      <h2>Results</h2>
-      <div class="metrics">
-        <div class="metric">
-          <span class="metric-label">Formality</span>
-          <div class="bar-wrapper">
-            <div class="bar" id="bar-formality"></div>
+        <!-- Results Card (hidden until response) -->
+        <section class="card results-card hidden" id="results-card">
+          <h2>Results</h2>
+          <div class="metrics">
+            <div class="metric">
+              <span class="metric-label">Formality</span>
+              <div class="bar-wrapper">
+                <div class="bar" id="bar-formality"></div>
+              </div>
+              <span class="metric-value" id="val-formality">—</span>
+            </div>
+            <div class="metric">
+              <span class="metric-label">Geodispersion</span>
+              <div class="bar-wrapper">
+                <div class="bar" id="bar-geodispersion"></div>
+              </div>
+              <span class="metric-value" id="val-geodispersion">—</span>
+            </div>
+            <div class="metric">
+              <span class="metric-label">Longevity</span>
+              <div class="bar-wrapper">
+                <div class="bar" id="bar-longevity"></div>
+              </div>
+              <span class="metric-value" id="val-longevity">—</span>
+            </div>
+            <div class="metric">
+              <span class="metric-label">Cohesion</span>
+              <div class="bar-wrapper">
+                <div class="bar" id="bar-cohesion"></div>
+              </div>
+              <span class="metric-value" id="val-cohesion">—</span>
+            </div>
           </div>
-          <span class="metric-value" id="val-formality">—</span>
-        </div>
-        <div class="metric">
-          <span class="metric-label">Geodispersion</span>
-          <div class="bar-wrapper">
-            <div class="bar" id="bar-geodispersion"></div>
+          <div class="classification" id="classification-wrapper">
+            <span class="classification-label">Community Pattern</span>
+            <span class="classification-value" id="val-category">—</span>
           </div>
-          <span class="metric-value" id="val-geodispersion">—</span>
-        </div>
-        <div class="metric">
-          <span class="metric-label">Longevity</span>
-          <div class="bar-wrapper">
-            <div class="bar" id="bar-longevity"></div>
-          </div>
-          <span class="metric-value" id="val-longevity">—</span>
-        </div>
-        <div class="metric">
-          <span class="metric-label">Cohesion</span>
-          <div class="bar-wrapper">
-            <div class="bar" id="bar-cohesion"></div>
-          </div>
-          <span class="metric-value" id="val-cohesion">—</span>
-        </div>
+        </section>
+
+        <!-- Error Banner (hidden until error) -->
+        <section class="card error-card hidden" id="error-card">
+          <p id="error-message"></p>
+        </section>
       </div>
-    </section>
 
-    <!-- Error Banner (hidden until error) -->
-    <section class="card error-card hidden" id="error-card">
-      <p id="error-message"></p>
-    </section>
+      <aside class="analysis-right hidden" id="analysis-right-panel">
+        <section class="card yoshi-image-card">
+          <h2>YOSHI-3 Decision Map</h2>
+          <img src="/images/YOSHI-3.drawio.png" alt="YOSHI-3 decision tree" class="yoshi-decision-image" />
+        </section>
+        <section class="card decision-tree" id="decision-tree-wrapper">
+          <h3>Decision Tree Path</h3>
+          <ol class="decision-steps" id="decision-steps"></ol>
+        </section>
+      </aside>
+    </div>
   </main>
 
   <footer>

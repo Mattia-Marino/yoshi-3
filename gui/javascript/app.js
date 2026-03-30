@@ -6,7 +6,9 @@ const repoInput = document.getElementById("repo");
 const submitBtn = document.getElementById("submit-btn");
 const btnText = submitBtn.querySelector(".btn-text");
 const spinner = submitBtn.querySelector(".spinner");
+const mainContent = document.getElementById("main-content");
 const resultsCard = document.getElementById("results-card");
+const analysisRightPanel = document.getElementById("analysis-right-panel");
 const errorCard = document.getElementById("error-card");
 const errorMessage = document.getElementById("error-message");
 const remainingRequestsEl = document.getElementById("remaining-requests");
@@ -16,6 +18,8 @@ const paramsOverlay = document.getElementById("params-overlay");
 const minCommitsInput = document.getElementById("min-commits");
 const daysInput = document.getElementById("days");
 const minActiveInput = document.getElementById("min-active");
+const categoryValueEl = document.getElementById("val-category");
+const decisionStepsEl = document.getElementById("decision-steps");
 
 const soundHome = document.getElementById("sound-home");
 const soundEnter = document.getElementById("sound-enter");
@@ -27,6 +31,14 @@ let requestsRefreshInFlight = false;
 const DEFAULT_MIN_COMMITS = "100";
 const DEFAULT_DAYS = "90";
 const DEFAULT_MIN_ACTIVE = "3";
+
+// Decision tree thresholds: edit these values to adjust category boundaries.
+const COMMUNITY_THRESHOLDS = {
+  geodispersion: 0.5,
+  formality: 0.5,
+  longevity: 0.5,
+  cohesion: 0.5,
+};
 
 function playSound(audio) {
   audio.currentTime = 0;
@@ -129,11 +141,19 @@ function showResults(data) {
     bar.style.width = `${pct}%`;
   });
 
+  const decisionResult = classifyCommunity(data);
+  categoryValueEl.textContent = decisionResult.category;
+  renderDecisionSteps(decisionResult.steps, decisionResult.category);
+
   resultsCard.classList.remove("hidden");
+  analysisRightPanel.classList.remove("hidden");
+  mainContent.classList.add("analysis-mode");
 }
 
 function hideResults() {
   resultsCard.classList.add("hidden");
+  analysisRightPanel.classList.add("hidden");
+  mainContent.classList.remove("analysis-mode");
 }
 
 function showError(msg) {
@@ -179,6 +199,107 @@ function parseNullableInt(rawValue) {
   }
 
   return num;
+}
+
+function classifyCommunity(data) {
+  const geodispersion = Number(data.geodispersion ?? 0);
+  const formality = Number(data.formality ?? 0);
+  const longevity = Number(data.longevity ?? 0);
+  const cohesion = Number(data.cohesion ?? 0);
+  const steps = [];
+
+  const geodispersionLow = geodispersion < COMMUNITY_THRESHOLDS.geodispersion;
+  steps.push(createDecisionStep("Geodispersion", geodispersion, COMMUNITY_THRESHOLDS.geodispersion, geodispersionLow, "Low geodispersion", "High geodispersion"));
+
+  if (geodispersionLow) {
+    const formalityLow = formality < COMMUNITY_THRESHOLDS.formality;
+    steps.push(createDecisionStep("Formality", formality, COMMUNITY_THRESHOLDS.formality, formalityLow, "Informal community branch", "Formal community branch"));
+
+    if (formalityLow) {
+      return {
+        category: "Informal Community (IC)",
+        steps,
+      };
+    }
+
+    const longevityLow = longevity < COMMUNITY_THRESHOLDS.longevity;
+    steps.push(createDecisionStep("Longevity", longevity, COMMUNITY_THRESHOLDS.longevity, longevityLow, "Project team branch", "High longevity branch"));
+
+    if (longevityLow) {
+      return {
+        category: "Project Team (PT)",
+        steps,
+      };
+    }
+
+    const cohesionLow = cohesion < COMMUNITY_THRESHOLDS.cohesion;
+    steps.push(createDecisionStep("Cohesion", cohesion, COMMUNITY_THRESHOLDS.cohesion, cohesionLow, "Strategic community branch", "Workgroup branch"));
+
+    if (cohesionLow) {
+      return {
+        category: "Strategic Community (SC)",
+        steps,
+      };
+    }
+
+    return {
+      category: "Workgroup (WG)",
+      steps,
+    };
+  }
+
+  const formalityLow = formality < COMMUNITY_THRESHOLDS.formality;
+  steps.push(createDecisionStep("Formality", formality, COMMUNITY_THRESHOLDS.formality, formalityLow, "Informal network branch", "Formal network branch"));
+
+  if (formalityLow) {
+    return {
+      category: "Informal Network (IN)",
+      steps,
+    };
+  }
+
+  return {
+    category: "Formal Network (FN)",
+    steps,
+  };
+}
+
+function createDecisionStep(metricLabel, metricValue, threshold, conditionResult, trueBranch, falseBranch) {
+  return {
+    metricLabel,
+    metricValue,
+    threshold,
+    conditionResult,
+    branch: conditionResult ? trueBranch : falseBranch,
+  };
+}
+
+function renderDecisionSteps(steps, category) {
+  decisionStepsEl.innerHTML = "";
+
+  steps.forEach((step) => {
+    const listItem = document.createElement("li");
+    listItem.className = "decision-step";
+
+    const mainText = document.createElement("span");
+    mainText.textContent = `${step.metricLabel}: ${step.metricValue.toFixed(4)} < ${step.threshold.toFixed(4)} => `;
+
+    const badge = document.createElement("span");
+    badge.className = `decision-badge ${step.conditionResult ? "true" : "false"}`;
+    badge.textContent = step.conditionResult ? "true" : "false";
+
+    const branchText = document.createElement("span");
+    branchText.className = "decision-branch";
+    branchText.textContent = ` (${step.branch})`;
+
+    listItem.append(mainText, badge, branchText);
+    decisionStepsEl.appendChild(listItem);
+  });
+
+  const finalItem = document.createElement("li");
+  finalItem.className = "decision-step decision-final";
+  finalItem.textContent = `Category selected: ${category}`;
+  decisionStepsEl.appendChild(finalItem);
 }
 
 async function updateRemainingRequests() {
