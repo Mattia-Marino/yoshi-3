@@ -43,10 +43,10 @@ const DEFAULT_DAYS = "90";
 const DEFAULT_MIN_ACTIVE = "3";
 
 const DEFAULT_COMMUNITY_THRESHOLDS = {
-  geodispersion: "0.50",
+  geodispersion: "0.25",
   formality: "0.50",
-  longevity: "0.50",
-  cohesion: "0.50",
+  longevity: "0.40",
+  cohesion: "0.40",
 };
 
 const thresholdControls = [
@@ -56,12 +56,23 @@ const thresholdControls = [
   { slider: thresholdCohesionInput, valueEl: thresholdCohesionValueEl },
 ];
 
+function applyDefaultFormValues() {
+  minCommitsInput.value = DEFAULT_MIN_COMMITS;
+  daysInput.value = DEFAULT_DAYS;
+  minActiveInput.value = DEFAULT_MIN_ACTIVE;
+  thresholdGeodispersionInput.value = DEFAULT_COMMUNITY_THRESHOLDS.geodispersion;
+  thresholdFormalityInput.value = DEFAULT_COMMUNITY_THRESHOLDS.formality;
+  thresholdLongevityInput.value = DEFAULT_COMMUNITY_THRESHOLDS.longevity;
+  thresholdCohesionInput.value = DEFAULT_COMMUNITY_THRESHOLDS.cohesion;
+}
+
 thresholdControls.forEach((control) => {
   control.slider.addEventListener("input", () => {
     syncThresholdSlider(control);
   });
 });
 
+applyDefaultFormValues();
 syncThresholdSliders();
 
 function playSound(audio) {
@@ -75,13 +86,7 @@ document.getElementById("home-btn").addEventListener("click", (e) => {
   playSound(soundHome);
   ownerInput.value = "";
   repoInput.value = "";
-  minCommitsInput.value = DEFAULT_MIN_COMMITS;
-  daysInput.value = DEFAULT_DAYS;
-  minActiveInput.value = DEFAULT_MIN_ACTIVE;
-  thresholdGeodispersionInput.value = DEFAULT_COMMUNITY_THRESHOLDS.geodispersion;
-  thresholdFormalityInput.value = DEFAULT_COMMUNITY_THRESHOLDS.formality;
-  thresholdLongevityInput.value = DEFAULT_COMMUNITY_THRESHOLDS.longevity;
-  thresholdCohesionInput.value = DEFAULT_COMMUNITY_THRESHOLDS.cohesion;
+  applyDefaultFormValues();
   syncThresholdSliders();
   hideResults();
   hideError();
