@@ -167,6 +167,11 @@ function setLoading(loading) {
 }
 
 function showResults(data) {
+  if (data.simple_project) {
+    showSimpleProjectResults(data);
+    return;
+  }
+
   metrics.forEach((key) => {
     const value = data[key] ?? 0;
     const pct = Math.min(Math.max(value * 100, 0), 100);
@@ -186,6 +191,19 @@ function showResults(data) {
   resultsCard.classList.remove("hidden");
 }
 
+function showSimpleProjectResults(data) {
+  metrics.forEach((key) => {
+    document.getElementById(`val-${key}`).textContent = "N/A";
+    const bar = document.getElementById(`bar-${key}`);
+    bar.style.width = "0";
+  });
+
+  const category = data.category || "Simple Project (SP)";
+  categoryValueEl.textContent = category;
+  renderStructureLowDecisionPath(category);
+  resultsCard.classList.remove("hidden");
+}
+
 function hideResults() {
   resultsCard.classList.add("hidden");
 }
@@ -193,6 +211,25 @@ function hideResults() {
 function showError(msg) {
   errorMessage.textContent = msg;
   errorCard.classList.remove("hidden");
+}
+
+function renderStructureLowDecisionPath(category) {
+  decisionStepsEl.innerHTML = "";
+
+  const startItem = document.createElement("li");
+  startItem.className = "decision-step";
+  startItem.textContent = "Start node from map: Structure";
+  decisionStepsEl.appendChild(startItem);
+
+  const structureItem = document.createElement("li");
+  structureItem.className = "decision-step";
+  structureItem.textContent = "Structure node: LOW -> Simple Project (SP)";
+  decisionStepsEl.appendChild(structureItem);
+
+  const stopItem = document.createElement("li");
+  stopItem.className = "decision-step decision-final";
+  stopItem.textContent = `Final category from map path: ${category}`;
+  decisionStepsEl.appendChild(stopItem);
 }
 
 function hideError() {

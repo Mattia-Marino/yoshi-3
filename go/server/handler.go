@@ -211,6 +211,8 @@ type ProcessHandlerResponse struct {
 	Geodispersion float64 `json:"geodispersion"`
 	Longevity     float64 `json:"longevity"`
 	Cohesion      float64 `json:"cohesion"`
+	SimpleProject bool    `json:"simple_project,omitempty"`
+	Category      string  `json:"category,omitempty"`
 	Error         string  `json:"error,omitempty"`
 }
 
@@ -268,7 +270,10 @@ func (h *Handler) ProcessHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	if !ok {
 		h.logger.Infof("Repository %s/%s not eligible: %s", req.Owner, req.Repo, reason)
-		h.respondWithJSON(w, http.StatusUnprocessableEntity, ProcessHandlerResponse{Error: reason})
+		h.respondWithJSON(w, http.StatusOK, ProcessHandlerResponse{
+			SimpleProject: true,
+			Category:      "Simple Project (SP)",
+		})
 		return
 	}
 
