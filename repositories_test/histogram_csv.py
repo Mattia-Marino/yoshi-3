@@ -56,7 +56,7 @@ def main() -> None:
 
         plt.figure(figsize=(9, 5))
         plt.hist(values, bins=args.bins, edgecolor="black")
-        plt.title(f"Istogramma - {metric}")
+        plt.title(f"Histogram - {metric}")
         plt.xlabel(metric)
         plt.ylabel("Frequenza")
         plt.grid(axis="y", alpha=0.25)
