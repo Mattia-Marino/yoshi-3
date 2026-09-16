@@ -34,7 +34,7 @@ func resolveEligibilityParams(req ExtractRequest) (int, int, int, error) {
 	minActive := defaultMinActive
 
 	if req.MinCommits != nil {
-		if *req.MinCommits <= 0 {
+		if *req.MinCommits < 0 {
 			return 0, 0, 0, fmt.Errorf("min_commits must be greater than 0")
 		}
 		minCommits = *req.MinCommits
@@ -48,7 +48,7 @@ func resolveEligibilityParams(req ExtractRequest) (int, int, int, error) {
 	}
 
 	if req.MinActive != nil {
-		if *req.MinActive <= 0 {
+		if *req.MinActive < 0 {
 			return 0, 0, 0, fmt.Errorf("min_active must be greater than 0")
 		}
 		minActive = *req.MinActive
