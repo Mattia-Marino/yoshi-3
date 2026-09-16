@@ -24,6 +24,11 @@ type Client struct {
 	ctx    context.Context
 	token  string
 	logger *logrus.Logger
+
+	mu             sync.RWMutex
+	knownRemaining int
+	knownAt        time.Time
+	hasKnown       bool
 }
 
 type authTransport struct {
@@ -69,10 +74,11 @@ func NewClient(token string, logger *logrus.Logger) *Client {
 	}
 
 	return &Client{
-		client: gith.NewClient(defaultHTTP),
-		ctx:    context.Background(),
-		token:  token,
-		logger: logger,
+		client:         gith.NewClient(defaultHTTP),
+		ctx:            context.Background(),
+		token:          token,
+		logger:         logger,
+		knownRemaining: 5000,
 	}
 }
 
@@ -381,18 +387,49 @@ func (c *Client) CheckRepoEligibility(owner, repo string, minCommits int, days i
 	return true, "", nil
 }
 
-// GetRemainingRequests fetches the remaining number of requests for the REST API (Core).
-// This is useful for monitoring usage against the 5,000 hourly limit.
-// Note: This API call itself does not consume quota.
+// observeRate records the quota seen in response headers (X-RateLimit-Remaining),
+// which is authoritative. GitHub's own docs recommend reading the headers
+// instead of calling GET /rate_limit, whose body can report stale values.
+func (c *Client) observeRate(resp *gith.Response) {
+	if resp == nil || resp.Rate.Remaining < 0 {
+		return
+	}
+	c.mu.Lock()
+	c.knownRemaining = resp.Rate.Remaining
+	c.knownAt = time.Now()
+	c.hasKnown = true
+	c.mu.Unlock()
+}
+
+// GetRemainingRequests returns the remaining number of requests for the REST API (Core).
+// It reads X-RateLimit-Remaining from the headers of a cheap real call instead of
+// the GET /rate_limit body, which can be stale/wrong. The value is cached for 30s
+// so the GUI polling does not drain quota (1 poll = 1 unit).
 func (c *Client) GetRemainingRequests() (int, error) {
-	limits, _, err := c.client.RateLimits(c.ctx)
+	c.mu.RLock()
+	if c.hasKnown && time.Since(c.knownAt) < 30*time.Second {
+		remaining := c.knownRemaining
+		c.mu.RUnlock()
+		return remaining, nil
+	}
+	c.mu.RUnlock()
+
+	_, resp, err := c.client.Repositories.Get(c.ctx, "octocat", "hello-world")
 	if err != nil {
+		if resp != nil {
+			c.observeRate(resp)
+			// 403/429 with headers still tells us the real quota (often 0).
+			if resp.Rate.Remaining >= 0 {
+				return resp.Rate.Remaining, nil
+			}
+		}
 		return 0, err
 	}
-	if limits.Core != nil {
-		return limits.Core.Remaining, nil
-	}
-	return 0, fmt.Errorf("could not retrieve core rate limits")
+	c.observeRate(resp)
+	c.mu.RLock()
+	remaining := c.knownRemaining
+	c.mu.RUnlock()
+	return remaining, nil
 }
 
 // Returns true if repository has at least one closed milestone.

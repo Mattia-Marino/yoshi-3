@@ -111,7 +111,12 @@ func (h *Handler) GetRemainingRequestsHandler(w http.ResponseWriter, r *http.Req
 	rate, err := gh.GetRemainingRequests()
 
 	if err != nil {
-		h.respondWithError(w, http.StatusBadRequest, "Invalid request")
+		h.logger.Errorf("GetRemainingRequests failed: %v", err)
+		h.respondWithJSON(w, http.StatusBadGateway, ExtractResponseLimits{
+			Remaining: rate,
+			Error:     err.Error(),
+		})
+		return
 	}
 
 	h.respondWithJSON(w, http.StatusOK, ExtractResponseLimits{
