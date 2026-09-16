@@ -151,12 +151,13 @@ form.addEventListener("submit", async (e) => {
     showError(err.message);
   } finally {
     setLoading(false);
+    updateRemainingRequests();
   }
 });
 
 setInterval(() => {
   updateRemainingRequests();
-}, 1000);
+}, 15000);
 
 updateRemainingRequests();
 
@@ -443,7 +444,7 @@ async function updateRemainingRequests() {
   requestsRefreshInFlight = true;
 
   try {
-    const res = await fetch(`${API_BASE}/remaining`);
+    const res = await fetch(`${API_BASE}/remaining`, { cache: "no-store" });
     if (!res.ok) {
       throw new Error(`Request failed (${res.status})`);
     }
