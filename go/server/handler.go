@@ -23,9 +23,9 @@ type ExtractRequest struct {
 }
 
 const (
-	defaultMinCommits = 1
-	defaultDays       = 1000
-	defaultMinActive  = 1
+	defaultMinCommits = 100
+	defaultDays       = 90
+	defaultMinActive  = 3
 )
 
 func resolveEligibilityParams(req ExtractRequest) (int, int, int, error) {

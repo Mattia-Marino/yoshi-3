@@ -42,3 +42,4 @@ pytorch/pytorch;0,3754;0,67;0,8815;0,0057
 huggingface/transformers;0,3383;0,72;0,7391;0,0188
 google/jax;0,3025;0,52;0,4637;0,0112
 flutter/flutter;0,3779;0,75;0,7914;0,0176
+numpy/numpy;0,3696;0,7500;0,5829;0,0111
