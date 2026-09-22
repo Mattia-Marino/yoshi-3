@@ -339,7 +339,21 @@ type EligibilityDetails struct {
 	Days        int `json:"days"`
 }
 
-func (c *Client) CheckRepoEligibility(owner, repo string, minCommits int, days int, minActive int) (bool, string, EligibilityDetails, error) {
+// EligibilityStatus tells callers which outcome the prechecks produced:
+//   - EligibilityEligible: commit and activity filters both passed, go ahead.
+//   - EligibilitySimpleProject: too few total commits (but recently active) -> SP.
+//   - EligibilityInactive: enough commits but dormant lately -> Inactive.
+//   - EligibilityInactiveSP: below both thresholds -> Inactive Simple Project.
+type EligibilityStatus string
+
+const (
+	EligibilityEligible      EligibilityStatus = "eligible"
+	EligibilitySimpleProject EligibilityStatus = "simple_project"
+	EligibilityInactive      EligibilityStatus = "inactive"
+	EligibilityInactiveSP    EligibilityStatus = "inactive_simple_project"
+)
+
+func (c *Client) CheckRepoEligibility(owner, repo string, minCommits int, days int, minActive int) (EligibilityStatus, string, EligibilityDetails, error) {
 	details := EligibilityDetails{
 		MinCommits: minCommits,
 		MinActive:  minActive,
@@ -380,19 +394,23 @@ func (c *Client) CheckRepoEligibility(owner, repo string, minCommits int, days i
 	details.ActiveCount = activeCount
 
 	if milestoneErr != nil {
-		return false, "", details, fmt.Errorf("error checking milestones: %w", milestoneErr)
+		return "", "", details, fmt.Errorf("error checking milestones: %w", milestoneErr)
 	}
 	// if !hasClosed {
-	// 	return false, "repository does not have at least 1 closed milestone", nil
+	// 	return "", "repository does not have at least 1 closed milestone", nil
 	// }
 
 	if commitErr != nil {
-		return false, "", details, fmt.Errorf("error counting commits: %w", commitErr)
+		return "", "", details, fmt.Errorf("error counting commits: %w", commitErr)
 	}
 	if commitCount < minCommits {
 		// Below threshold: the count is exact (fully enumerated).
 		details.CommitCount = commitCount
-		return false, fmt.Sprintf("%d/%d total commits", commitCount, minCommits), details, nil
+		if !activeOk {
+			// Below both thresholds: dormant simple project.
+			return EligibilityInactiveSP, "the repository is an inactive simple project", details, nil
+		}
+		return EligibilitySimpleProject, fmt.Sprintf("%d/%d total commits", commitCount, minCommits), details, nil
 	}
 
 	// Threshold passed: the count above is capped at minCommits (early-stop),
@@ -405,13 +423,14 @@ func (c *Client) CheckRepoEligibility(owner, repo string, minCommits int, days i
 	details.CommitCount = commitCount
 
 	if activeErr != nil {
-		return false, "", details, fmt.Errorf("error checking active contributors: %w", activeErr)
+		return "", "", details, fmt.Errorf("error checking active contributors: %w", activeErr)
 	}
 	if !activeOk {
-		return false, fmt.Sprintf("%d/%d active members in last %d days", activeCount, minActive, days), details, nil
+		// Big but dormant repository: not a Simple Project, report inactivity.
+		return EligibilityInactive, fmt.Sprintf("the repository is not active in last %d days", days), details, nil
 	}
 
-	return true, "", details, nil
+	return EligibilityEligible, "", details, nil
 }
 
 // observeRate records the quota seen in response headers (X-RateLimit-Remaining),

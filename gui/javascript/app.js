@@ -168,8 +168,18 @@ function setLoading(loading) {
 }
 
 function showResults(data) {
+  if (data.simple_project && data.inactive) {
+    showInactiveSPResults(data);
+    return;
+  }
+
   if (data.simple_project) {
     showSimpleProjectResults(data);
+    return;
+  }
+
+  if (data.inactive) {
+    showInactiveResults(data);
     return;
   }
 
@@ -211,6 +221,51 @@ function showSimpleProjectResults(data) {
   }
   renderStructureLowDecisionPath(category);
   resultsCard.classList.remove("hidden");
+}
+
+function showInactiveResults(data) {
+  metrics.forEach((key) => {
+    document.getElementById(`val-${key}`).textContent = "N/A";
+    const bar = document.getElementById(`bar-${key}`);
+    bar.style.width = "0";
+  });
+
+  const category = data.category || "Inactive";
+  categoryValueEl.textContent = category;
+  const spDetailsEl = document.getElementById("sp-details");
+  if (spDetailsEl) {
+    const reason = data.reason ? capitalizeFirst(data.reason) : "";
+    const counts = formatSimpleProjectDetails(data);
+    spDetailsEl.textContent = reason && counts && counts !== reason ? `${reason}. ${counts}` : reason || counts;
+  }
+  renderInactiveDecisionPath(data.reason, category);
+  resultsCard.classList.remove("hidden");
+}
+
+function showInactiveSPResults(data) {
+  metrics.forEach((key) => {
+    document.getElementById(`val-${key}`).textContent = "N/A";
+    const bar = document.getElementById(`bar-${key}`);
+    bar.style.width = "0";
+  });
+
+  const category = data.category || "Inactive Simple Project (ISP)";
+  categoryValueEl.textContent = category;
+  const spDetailsEl = document.getElementById("sp-details");
+  if (spDetailsEl) {
+    const reason = data.reason ? capitalizeFirst(data.reason) : "";
+    const counts = formatSimpleProjectDetails(data);
+    spDetailsEl.textContent = reason && counts && counts !== reason ? `${reason}. ${counts}` : reason || counts;
+  }
+  renderInactiveSPDecisionPath(data, category);
+  resultsCard.classList.remove("hidden");
+}
+
+function capitalizeFirst(text) {
+  if (!text) {
+    return "";
+  }
+  return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
 function formatSimpleProjectDetails(data) {
@@ -255,6 +310,56 @@ function renderStructureLowDecisionPath(category) {
   structureItem.className = "decision-step";
   structureItem.textContent = "Structure node: LOW -> Simple Project (SP)";
   decisionStepsEl.appendChild(structureItem);
+
+  const stopItem = document.createElement("li");
+  stopItem.className = "decision-step decision-final";
+  stopItem.textContent = `Final category from map path: ${category}`;
+  decisionStepsEl.appendChild(stopItem);
+}
+
+function renderInactiveDecisionPath(reason, category) {
+  decisionStepsEl.innerHTML = "";
+
+  const startItem = document.createElement("li");
+  startItem.className = "decision-step";
+  startItem.textContent = "Eligibility check: commit threshold passed";
+  decisionStepsEl.appendChild(startItem);
+
+  const activityItem = document.createElement("li");
+  activityItem.className = "decision-step";
+  activityItem.textContent = `Activity check: ${reason || "not active"} -> Inactive`;
+  decisionStepsEl.appendChild(activityItem);
+
+  const stopItem = document.createElement("li");
+  stopItem.className = "decision-step decision-final";
+  stopItem.textContent = `Final category from map path: ${category}`;
+  decisionStepsEl.appendChild(stopItem);
+}
+
+function renderInactiveSPDecisionPath(data, category) {
+  decisionStepsEl.innerHTML = "";
+
+  const startItem = document.createElement("li");
+  startItem.className = "decision-step";
+  startItem.textContent = "Eligibility check: commit threshold not passed";
+  decisionStepsEl.appendChild(startItem);
+
+  const structureItem = document.createElement("li");
+  structureItem.className = "decision-step";
+  structureItem.textContent = "Structure node: LOW -> Simple Project (SP)";
+  decisionStepsEl.appendChild(structureItem);
+
+  const activityItem = document.createElement("li");
+  activityItem.className = "decision-step";
+  const activeFound = Number(data.active_found);
+  const activeRequired = Number(data.active_required);
+  const days = Number(data.days);
+  const activityText =
+    Number.isFinite(activeFound) && Number.isFinite(activeRequired) && Number.isFinite(days)
+      ? `${activeFound}/${activeRequired} active members in last ${days} days`
+      : data.reason || "not active";
+  activityItem.textContent = `Activity check: ${activityText} -> Inactive`;
+  decisionStepsEl.appendChild(activityItem);
 
   const stopItem = document.createElement("li");
   stopItem.className = "decision-step decision-final";

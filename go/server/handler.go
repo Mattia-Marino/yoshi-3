@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"runtime"
 
+	"github-extractor/github"
 	"github-extractor/grpcclient"
 	"github-extractor/models"
 	pb "github-extractor/proto"
@@ -170,18 +171,19 @@ func (h *Handler) ExtractHandler(w http.ResponseWriter, r *http.Request) {
 	gh := h.service.ghClient
 
 	// Run eligibility checks using user-provided thresholds or defaults.
-	ok, reason, details, err := gh.CheckRepoEligibility(req.Owner, req.Repo, minCommits, days, minActive)
+	status, reason, details, err := gh.CheckRepoEligibility(req.Owner, req.Repo, minCommits, days, minActive)
 	if err != nil {
 		h.logger.Errorf("Error checking eligibility for %s/%s: %v", req.Owner, req.Repo, err)
 		http.Error(w, "internal error checking repository eligibility: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	if !ok {
-		h.logger.Infof("Repository %s/%s not eligible: %s", req.Owner, req.Repo, reason)
+	if status != github.EligibilityEligible {
+		h.logger.Infof("Repository %s/%s not eligible (%s): %s", req.Owner, req.Repo, status, reason)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnprocessableEntity) // 422
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"error":            reason,
+			"status":           string(status),
 			"commits_found":    details.CommitCount,
 			"commits_required": details.MinCommits,
 			"active_found":     details.ActiveCount,
@@ -225,6 +227,7 @@ type ProcessHandlerResponse struct {
 	Cohesion        float64 `json:"cohesion"`
 	SimpleProject   bool    `json:"simple_project,omitempty"`
 	Category        string  `json:"category,omitempty"`
+	Inactive        bool    `json:"inactive,omitempty"`
 	Reason          string  `json:"reason,omitempty"`
 	CommitsFound    int     `json:"commits_found"`
 	CommitsRequired int     `json:"commits_required"`
@@ -280,17 +283,46 @@ func (h *Handler) ProcessHandler(w http.ResponseWriter, r *http.Request) {
 
 	gh := h.service.ghClient
 
-	ok, reason, details, err := gh.CheckRepoEligibility(req.Owner, req.Repo, minCommits, days, minActive)
+	status, reason, details, err := gh.CheckRepoEligibility(req.Owner, req.Repo, minCommits, days, minActive)
 	if err != nil {
 		h.logger.Errorf("Error checking eligibility for %s/%s: %v", req.Owner, req.Repo, err)
 		h.respondWithJSON(w, http.StatusInternalServerError, ProcessHandlerResponse{Error: "internal error checking repository eligibility: " + err.Error()})
 		return
 	}
-	if !ok {
+	if status == github.EligibilitySimpleProject {
 		h.logger.Infof("Repository %s/%s not eligible: %s", req.Owner, req.Repo, reason)
 		h.respondWithJSON(w, http.StatusOK, ProcessHandlerResponse{
 			SimpleProject:   true,
 			Category:        "Simple Project (SP)",
+			Reason:          reason,
+			CommitsFound:    details.CommitCount,
+			CommitsRequired: details.MinCommits,
+			ActiveFound:     details.ActiveCount,
+			ActiveRequired:  details.MinActive,
+			Days:            details.Days,
+		})
+		return
+	}
+	if status == github.EligibilityInactive {
+		h.logger.Infof("Repository %s/%s inactive: %s", req.Owner, req.Repo, reason)
+		h.respondWithJSON(w, http.StatusOK, ProcessHandlerResponse{
+			Inactive:        true,
+			Category:        "Inactive",
+			Reason:          reason,
+			CommitsFound:    details.CommitCount,
+			CommitsRequired: details.MinCommits,
+			ActiveFound:     details.ActiveCount,
+			ActiveRequired:  details.MinActive,
+			Days:            details.Days,
+		})
+		return
+	}
+	if status == github.EligibilityInactiveSP {
+		h.logger.Infof("Repository %s/%s inactive simple project: %s", req.Owner, req.Repo, reason)
+		h.respondWithJSON(w, http.StatusOK, ProcessHandlerResponse{
+			SimpleProject:   true,
+			Inactive:        true,
+			Category:        "Inactive Simple Project (ISP)",
 			Reason:          reason,
 			CommitsFound:    details.CommitCount,
 			CommitsRequired: details.MinCommits,
