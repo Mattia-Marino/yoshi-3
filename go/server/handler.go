@@ -23,7 +23,7 @@ type ExtractRequest struct {
 }
 
 const (
-	defaultMinCommits = 100
+	defaultMinCommits = 1500
 	defaultDays       = 90
 	defaultMinActive  = 3
 )
@@ -170,7 +170,7 @@ func (h *Handler) ExtractHandler(w http.ResponseWriter, r *http.Request) {
 	gh := h.service.ghClient
 
 	// Run eligibility checks using user-provided thresholds or defaults.
-	ok, reason, err := gh.CheckRepoEligibility(req.Owner, req.Repo, minCommits, days, minActive)
+	ok, reason, details, err := gh.CheckRepoEligibility(req.Owner, req.Repo, minCommits, days, minActive)
 	if err != nil {
 		h.logger.Errorf("Error checking eligibility for %s/%s: %v", req.Owner, req.Repo, err)
 		http.Error(w, "internal error checking repository eligibility: "+err.Error(), http.StatusInternalServerError)
@@ -180,7 +180,14 @@ func (h *Handler) ExtractHandler(w http.ResponseWriter, r *http.Request) {
 		h.logger.Infof("Repository %s/%s not eligible: %s", req.Owner, req.Repo, reason)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnprocessableEntity) // 422
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": reason})
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"error":            reason,
+			"commits_found":    details.CommitCount,
+			"commits_required": details.MinCommits,
+			"active_found":     details.ActiveCount,
+			"active_required":  details.MinActive,
+			"days":             details.Days,
+		})
 		return
 	}
 
@@ -212,13 +219,19 @@ func (h *Handler) respondWithError(w http.ResponseWriter, statusCode int, messag
 
 // ProcessHandlerResponse represents the response from the /process endpoint
 type ProcessHandlerResponse struct {
-	Formality     float64 `json:"formality"`
-	Geodispersion float64 `json:"geodispersion"`
-	Longevity     float64 `json:"longevity"`
-	Cohesion      float64 `json:"cohesion"`
-	SimpleProject bool    `json:"simple_project,omitempty"`
-	Category      string  `json:"category,omitempty"`
-	Error         string  `json:"error,omitempty"`
+	Formality       float64 `json:"formality"`
+	Geodispersion   float64 `json:"geodispersion"`
+	Longevity       float64 `json:"longevity"`
+	Cohesion        float64 `json:"cohesion"`
+	SimpleProject   bool    `json:"simple_project,omitempty"`
+	Category        string  `json:"category,omitempty"`
+	Reason          string  `json:"reason,omitempty"`
+	CommitsFound    int     `json:"commits_found"`
+	CommitsRequired int     `json:"commits_required"`
+	ActiveFound     int     `json:"active_found"`
+	ActiveRequired  int     `json:"active_required"`
+	Days            int     `json:"days"`
+	Error           string  `json:"error,omitempty"`
 }
 
 // ProcessHandler handles the POST request for extracting and processing repository metrics
@@ -267,7 +280,7 @@ func (h *Handler) ProcessHandler(w http.ResponseWriter, r *http.Request) {
 
 	gh := h.service.ghClient
 
-	ok, reason, err := gh.CheckRepoEligibility(req.Owner, req.Repo, minCommits, days, minActive)
+	ok, reason, details, err := gh.CheckRepoEligibility(req.Owner, req.Repo, minCommits, days, minActive)
 	if err != nil {
 		h.logger.Errorf("Error checking eligibility for %s/%s: %v", req.Owner, req.Repo, err)
 		h.respondWithJSON(w, http.StatusInternalServerError, ProcessHandlerResponse{Error: "internal error checking repository eligibility: " + err.Error()})
@@ -276,8 +289,14 @@ func (h *Handler) ProcessHandler(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		h.logger.Infof("Repository %s/%s not eligible: %s", req.Owner, req.Repo, reason)
 		h.respondWithJSON(w, http.StatusOK, ProcessHandlerResponse{
-			SimpleProject: true,
-			Category:      "Simple Project (SP)",
+			SimpleProject:   true,
+			Category:        "Simple Project (SP)",
+			Reason:          reason,
+			CommitsFound:    details.CommitCount,
+			CommitsRequired: details.MinCommits,
+			ActiveFound:     details.ActiveCount,
+			ActiveRequired:  details.MinActive,
+			Days:            details.Days,
 		})
 		return
 	}
@@ -301,9 +320,14 @@ func (h *Handler) ProcessHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.respondWithJSON(w, http.StatusOK, ProcessHandlerResponse{
-		Formality:     metrics.Formality,
-		Geodispersion: metrics.Geodispersion,
-		Longevity:     metrics.Longevity,
-		Cohesion:      metrics.Cohesion,
+		Formality:       metrics.Formality,
+		Geodispersion:   metrics.Geodispersion,
+		Longevity:       metrics.Longevity,
+		Cohesion:        metrics.Cohesion,
+		CommitsFound:    details.CommitCount,
+		CommitsRequired: details.MinCommits,
+		ActiveFound:     details.ActiveCount,
+		ActiveRequired:  details.MinActive,
+		Days:            details.Days,
 	})
 }

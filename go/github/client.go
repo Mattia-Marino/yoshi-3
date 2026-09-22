@@ -326,11 +326,25 @@ func (c *Client) GetRepositoryInfo(owner, repo string) models.RepositoryInfo {
 	return info
 }
 
-// CheckRepoEligibility runs the three prechecks the server should apply before heavy fetches:
-//   - at least 1 closed milestone
-//   - at least `minCommits` commits (use 100 where caller passes 100)
-//   - at least `minActive` distinct commit authors in the last `days` days (use 3, 90)
-func (c *Client) CheckRepoEligibility(owner, repo string, minCommits int, days int, minActive int) (bool, string, error) {
+// CheckRepoEligibility runs the two prechecks the server applies before heavy fetches:
+//   - at least `minCommits` total commits (default 1500)
+//   - at least `minActive` distinct commit authors in the last `days` days (default 3, 90)
+// EligibilityDetails carries the measured values alongside the required
+// thresholds so callers can report e.g. "1600/1500 total commits".
+type EligibilityDetails struct {
+	CommitCount int `json:"commits_found"`
+	MinCommits  int `json:"commits_required"`
+	ActiveCount int `json:"active_found"`
+	MinActive   int `json:"active_required"`
+	Days        int `json:"days"`
+}
+
+func (c *Client) CheckRepoEligibility(owner, repo string, minCommits int, days int, minActive int) (bool, string, EligibilityDetails, error) {
+	details := EligibilityDetails{
+		MinCommits: minCommits,
+		MinActive:  minActive,
+		Days:       days,
+	}
 	var wg sync.WaitGroup
 	wg.Add(3)
 
@@ -363,28 +377,31 @@ func (c *Client) CheckRepoEligibility(owner, repo string, minCommits int, days i
 
 	wg.Wait()
 
+	details.CommitCount = commitCount
+	details.ActiveCount = activeCount
+
 	if milestoneErr != nil {
-		return false, "", fmt.Errorf("error checking milestones: %w", milestoneErr)
+		return false, "", details, fmt.Errorf("error checking milestones: %w", milestoneErr)
 	}
 	// if !hasClosed {
 	// 	return false, "repository does not have at least 1 closed milestone", nil
 	// }
 
 	if commitErr != nil {
-		return false, "", fmt.Errorf("error counting commits: %w", commitErr)
+		return false, "", details, fmt.Errorf("error counting commits: %w", commitErr)
 	}
 	if commitCount < minCommits {
-		return false, fmt.Sprintf("repository has fewer than %d commits (found %d)", minCommits, commitCount), nil
+		return false, fmt.Sprintf("%d/%d total commits", commitCount, minCommits), details, nil
 	}
 
 	if activeErr != nil {
-		return false, "", fmt.Errorf("error checking active contributors: %w", activeErr)
+		return false, "", details, fmt.Errorf("error checking active contributors: %w", activeErr)
 	}
 	if !activeOk {
-		return false, fmt.Sprintf("fewer than %d active contributors in the last %d days (found %d)", minActive, days, activeCount), nil
+		return false, fmt.Sprintf("%d/%d active members in last %d days", activeCount, minActive, days), details, nil
 	}
 
-	return true, "", nil
+	return true, "", details, nil
 }
 
 // observeRate records the quota seen in response headers (X-RateLimit-Remaining),

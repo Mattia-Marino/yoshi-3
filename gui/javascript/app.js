@@ -38,7 +38,7 @@ const soundError = document.getElementById("sound-error");
 const metrics = ["formality", "geodispersion", "longevity", "cohesion"];
 let requestsRefreshInFlight = false;
 
-const DEFAULT_MIN_COMMITS = "100";
+const DEFAULT_MIN_COMMITS = "1500";
 const DEFAULT_DAYS = "90";
 const DEFAULT_MIN_ACTIVE = "3";
 
@@ -188,6 +188,10 @@ function showResults(data) {
   const decisionResult = classifyCommunity(data);
   categoryValueEl.textContent = decisionResult.category;
   renderDecisionSteps(decisionResult.steps, decisionResult.category);
+  const spDetailsEl = document.getElementById("sp-details");
+  if (spDetailsEl) {
+    spDetailsEl.textContent = formatSimpleProjectDetails(data);
+  }
 
   resultsCard.classList.remove("hidden");
 }
@@ -201,8 +205,33 @@ function showSimpleProjectResults(data) {
 
   const category = data.category || "Simple Project (SP)";
   categoryValueEl.textContent = category;
+  const spDetailsEl = document.getElementById("sp-details");
+  if (spDetailsEl) {
+    spDetailsEl.textContent = formatSimpleProjectDetails(data);
+  }
   renderStructureLowDecisionPath(category);
   resultsCard.classList.remove("hidden");
+}
+
+function formatSimpleProjectDetails(data) {
+  const commitsFound = Number(data.commits_found);
+  const commitsRequired = Number(data.commits_required);
+  const activeFound = Number(data.active_found);
+  const activeRequired = Number(data.active_required);
+  const days = Number(data.days);
+
+  const hasCounts =
+    Number.isFinite(commitsFound) &&
+    Number.isFinite(commitsRequired) &&
+    Number.isFinite(activeFound) &&
+    Number.isFinite(activeRequired) &&
+    Number.isFinite(days);
+
+  if (hasCounts) {
+    return `The repo has ${commitsFound}/${commitsRequired} total commits and ${activeFound}/${activeRequired} active members in last ${days} days.`;
+  }
+
+  return data.reason || "";
 }
 
 function hideResults() {
