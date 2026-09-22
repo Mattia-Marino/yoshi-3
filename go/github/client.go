@@ -377,7 +377,6 @@ func (c *Client) CheckRepoEligibility(owner, repo string, minCommits int, days i
 
 	wg.Wait()
 
-	details.CommitCount = commitCount
 	details.ActiveCount = activeCount
 
 	if milestoneErr != nil {
@@ -391,8 +390,19 @@ func (c *Client) CheckRepoEligibility(owner, repo string, minCommits int, days i
 		return false, "", details, fmt.Errorf("error counting commits: %w", commitErr)
 	}
 	if commitCount < minCommits {
+		// Below threshold: the count is exact (fully enumerated).
+		details.CommitCount = commitCount
 		return false, fmt.Sprintf("%d/%d total commits", commitCount, minCommits), details, nil
 	}
+
+	// Threshold passed: the count above is capped at minCommits (early-stop),
+	// so resolve the exact total with a single cheap call (LastPage header).
+	if exact, err := c.getCommitCount(owner, repo); err == nil {
+		commitCount = exact
+	} else {
+		c.logger.Warnf("Could not resolve exact commit count for %s/%s, using capped value: %v", owner, repo, err)
+	}
+	details.CommitCount = commitCount
 
 	if activeErr != nil {
 		return false, "", details, fmt.Errorf("error checking active contributors: %w", activeErr)
@@ -553,7 +563,8 @@ func (c *Client) getMilestoneCount(owner, repo string) (int, error) {
 }
 
 // hasActiveContributors returns (ok, count, err) where ok==true if unique authors in 'days' period >= minNeeded.
-// It counts unique commit authors (by Login) in commits since now - days.
+// It counts ALL unique commit authors (by Login, falling back to email) in commits since now - days,
+// scanning up to pageLimit pages. The count is exact unless the page cap is hit (warned in logs).
 func (c *Client) hasActiveContributors(owner, repo string, days int, minNeeded int) (bool, int, error) {
 	since := time.Now().AddDate(0, 0, -days)
 	opts := &gith.CommitsListOptions{
@@ -572,16 +583,9 @@ func (c *Client) hasActiveContributors(owner, repo string, days int, minNeeded i
 		for _, cm := range commits {
 			if cm.Author != nil && cm.Author.Login != nil && *cm.Author.Login != "" {
 				seen[*cm.Author.Login] = struct{}{}
-				if len(seen) >= minNeeded {
-					return true, len(seen), nil
-				}
-			} else if cm.Commit != nil && cm.Commit.Author != nil && cm.Commit.Author.Email != nil {
+			} else if cm.Commit != nil && cm.Commit.Author != nil && cm.Commit.Author.Email != nil && *cm.Commit.Author.Email != "" {
 				// fallback: use email as identifier for anonymous/non-github authors
-				seenKey := *cm.Commit.Author.Email
-				seen[seenKey] = struct{}{}
-				if len(seen) >= minNeeded {
-					return true, len(seen), nil
-				}
+				seen[*cm.Commit.Author.Email] = struct{}{}
 			}
 		}
 		pages++
@@ -589,6 +593,9 @@ func (c *Client) hasActiveContributors(owner, repo string, days int, minNeeded i
 			break
 		}
 		opts.Page = resp.NextPage
+	}
+	if pages >= pageLimit {
+		c.logger.Warnf("Active-contributor scan for %s/%s hit the %d-page cap; count (%d) may be partial", owner, repo, pageLimit, len(seen))
 	}
 	return len(seen) >= minNeeded, len(seen), nil
 }
