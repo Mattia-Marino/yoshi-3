@@ -169,6 +169,23 @@
         <section class="card error-card hidden" id="error-card">
           <p id="error-message"></p>
         </section>
+
+        <!-- Typed graph: cohesion (follower/follow), same /process response -->
+        <section class="card graph-card hidden" id="graph-card">
+          <h2>Cohesion Graph</h2>
+          <p class="graph-subtitle">Nodes = contributors, directed edge A → B = A follows B (type: follows).</p>
+          <p class="graph-info" id="cohesion-graph-info"></p>
+          <div class="graph-container" id="cohesion-graph"></div>
+        </section>
+
+        <!-- Typed graph: geographic proximity, same /process response -->
+        <section class="card graph-card hidden" id="geo-graph-card">
+          <h2>Geographic Proximity Graph</h2>
+          <p class="graph-subtitle">Nodes = contributors with matched location (color = country). Edges: same country or nearby (&lt;500 km).</p>
+          <p class="graph-info" id="geo-graph-info"></p>
+          <div class="graph-legend" id="geo-graph-legend"></div>
+          <div class="graph-container" id="geo-graph"></div>
+        </section>
       </div>
 
       <aside class="analysis-right" id="analysis-right-panel">
@@ -201,6 +218,7 @@
     <p>YOSHI-3 &mdash; Yielding Open-Source Health Information</p>
   </footer>
 
+  <script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
   <script src="/javascript/app.js"></script>
 </body>
 </html>

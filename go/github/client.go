@@ -7,6 +7,7 @@ import (
 	"math"
 	"net"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -295,7 +296,7 @@ func (c *Client) GetRepositoryInfo(owner, repo string) models.RepositoryInfo {
 			info.Contributors = nil
 			info.ContributorsWithLocationCount = 0
 		} else {
-			communityFollowers, communityFollowing, followGraphErr := c.getCommunityFollowCounts(targetContributors)
+			communityFollowers, communityFollowing, followEdges, followGraphErr := c.getCommunityFollowCounts(targetContributors)
 			if followGraphErr != nil {
 				c.logger.Warnf("Failed to fetch full community follow graph for %s/%s: %v", owner, repo, followGraphErr)
 			}
@@ -320,6 +321,27 @@ func (c *Client) GetRepositoryInfo(owner, repo string) models.RepositoryInfo {
 			}
 			info.Contributors = withLocation
 			info.ContributorsWithLocationCount = len(withLocation)
+
+			// Keep only edges between contributors retained for the cohesion
+			// computation (same node set Python receives).
+			kept := make(map[string]struct{}, len(withLocation))
+			for _, d := range withLocation {
+				kept[strings.ToLower(d.Login)] = struct{}{}
+			}
+			filtered := make([]models.FollowEdge, 0, len(followEdges))
+			for _, e := range followEdges {
+				if _, ok := kept[strings.ToLower(e.From)]; !ok {
+					continue
+				}
+				if _, ok := kept[strings.ToLower(e.To)]; !ok {
+					continue
+				}
+				filtered = append(filtered, e)
+			}
+			if filtered == nil {
+				filtered = []models.FollowEdge{}
+			}
+			info.FollowEdges = filtered
 		}
 	}
 
@@ -786,26 +808,32 @@ func (c *Client) getContributorsDetails(usernames []string) ([]models.Contributo
 
 // getCommunityFollowCounts computes followers/following counts restricted to the provided community.
 // It scans each member's following list and keeps only edges between members of the same community.
-func (c *Client) getCommunityFollowCounts(usernames []string) (map[string]int, map[string]int, error) {
+// It also returns the directed edge list (from -> to, where from follows to).
+func (c *Client) getCommunityFollowCounts(usernames []string) (map[string]int, map[string]int, []models.FollowEdge, error) {
 	community := make(map[string]struct{}, len(usernames))
+	display := make(map[string]string, len(usernames))
 	followersCount := make(map[string]int, len(usernames))
 	followingCount := make(map[string]int, len(usernames))
 
 	for _, u := range usernames {
 		key := strings.ToLower(u)
 		community[key] = struct{}{}
+		if _, ok := display[key]; !ok {
+			display[key] = u
+		}
 		followersCount[key] = 0
 		followingCount[key] = 0
 	}
 
 	if len(community) == 0 {
-		return followersCount, followingCount, nil
+		return followersCount, followingCount, nil, nil
 	}
 
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, 5)
 	var mu sync.Mutex
 	failed := 0
+	var edges []models.FollowEdge
 
 	for _, username := range usernames {
 		u := username
@@ -854,6 +882,15 @@ func (c *Client) getCommunityFollowCounts(usernames []string) (map[string]int, m
 			followingCount[selfKey] = len(seenCommunityFollowees)
 			for targetKey := range seenCommunityFollowees {
 				followersCount[targetKey]++
+				from := display[selfKey]
+				if from == "" {
+					from = selfKey
+				}
+				to := display[targetKey]
+				if to == "" {
+					to = targetKey
+				}
+				edges = append(edges, models.FollowEdge{From: from, To: to, Type: "follows"})
 			}
 			mu.Unlock()
 		}()
@@ -862,10 +899,17 @@ func (c *Client) getCommunityFollowCounts(usernames []string) (map[string]int, m
 	wg.Wait()
 
 	if failed == len(usernames) && len(usernames) > 0 {
-		return followersCount, followingCount, fmt.Errorf("failed to fetch community following lists for all contributors")
+		return followersCount, followingCount, edges, fmt.Errorf("failed to fetch community following lists for all contributors")
 	}
 
-	return followersCount, followingCount, nil
+	sort.Slice(edges, func(i, j int) bool {
+		if edges[i].From == edges[j].From {
+			return edges[i].To < edges[j].To
+		}
+		return edges[i].From < edges[j].From
+	})
+
+	return followersCount, followingCount, edges, nil
 }
 
 // getAllCommits fetches commits from a repository with an optional limit

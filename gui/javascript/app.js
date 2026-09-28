@@ -30,6 +30,15 @@ const mapZoomTrigger = document.getElementById("map-zoom-trigger");
 const mapModal = document.getElementById("map-modal");
 const mapModalBackdrop = document.getElementById("map-modal-backdrop");
 const mapModalClose = document.getElementById("map-modal-close");
+const graphCard = document.getElementById("graph-card");
+const cohesionGraphEl = document.getElementById("cohesion-graph");
+const cohesionGraphInfoEl = document.getElementById("cohesion-graph-info");
+let cohesionNetwork = null;
+const geoGraphCard = document.getElementById("geo-graph-card");
+const geoGraphEl = document.getElementById("geo-graph");
+const geoGraphInfoEl = document.getElementById("geo-graph-info");
+const geoGraphLegendEl = document.getElementById("geo-graph-legend");
+let geoNetwork = null;
 
 const soundHome = document.getElementById("sound-home");
 const soundEnter = document.getElementById("sound-enter");
@@ -90,6 +99,8 @@ document.getElementById("home-btn").addEventListener("click", (e) => {
   syncThresholdSliders();
   hideResults();
   hideError();
+  hideCohesionGraph();
+  hideGeoGraph();
 });
 
 paramsToggleBtn.addEventListener("click", toggleParamsDrawer);
@@ -115,6 +126,8 @@ form.addEventListener("submit", async (e) => {
   setLoading(true);
   hideResults();
   hideError();
+  hideCohesionGraph();
+  hideGeoGraph();
 
   try {
     let res;
@@ -204,6 +217,8 @@ function showResults(data) {
   }
 
   resultsCard.classList.remove("hidden");
+  renderCohesionGraph(data.cohesion_graph);
+  renderGeoGraph(data.geo_graph);
 }
 
 function showSimpleProjectResults(data) {
@@ -221,6 +236,8 @@ function showSimpleProjectResults(data) {
   }
   renderStructureLowDecisionPath(category);
   resultsCard.classList.remove("hidden");
+  hideCohesionGraph();
+  hideGeoGraph();
 }
 
 function showInactiveResults(data) {
@@ -240,6 +257,8 @@ function showInactiveResults(data) {
   }
   renderInactiveDecisionPath(data.reason, category);
   resultsCard.classList.remove("hidden");
+  hideCohesionGraph();
+  hideGeoGraph();
 }
 
 function showInactiveSPResults(data) {
@@ -259,6 +278,8 @@ function showInactiveSPResults(data) {
   }
   renderInactiveSPDecisionPath(data, category);
   resultsCard.classList.remove("hidden");
+  hideCohesionGraph();
+  hideGeoGraph();
 }
 
 function capitalizeFirst(text) {
@@ -291,6 +312,192 @@ function formatSimpleProjectDetails(data) {
 
 function hideResults() {
   resultsCard.classList.add("hidden");
+}
+
+function hideCohesionGraph() {
+  if (cohesionNetwork) {
+    cohesionNetwork.destroy();
+    cohesionNetwork = null;
+  }
+  if (cohesionGraphEl) {
+    cohesionGraphEl.innerHTML = "";
+  }
+  if (cohesionGraphInfoEl) {
+    cohesionGraphInfoEl.textContent = "";
+  }
+  if (graphCard) {
+    graphCard.classList.add("hidden");
+  }
+}
+
+function renderCohesionGraph(graph) {
+  if (!graphCard || !cohesionGraphEl || !cohesionGraphInfoEl) {
+    return;
+  }
+  hideCohesionGraph();
+  hideGeoGraph();
+
+  const nodes = Array.isArray(graph?.nodes) ? graph.nodes : [];
+  const edges = Array.isArray(graph?.edges) ? graph.edges : [];
+
+  if (typeof vis === "undefined" || !vis.Network) {
+    cohesionGraphInfoEl.textContent = "Graph library unavailable (offline CDN). Metrics above are unaffected.";
+    cohesionGraphEl.innerHTML = '<div class="graph-empty">vis-network failed to load.</div>';
+    graphCard.classList.remove("hidden");
+    return;
+  }
+
+  if (nodes.length === 0) {
+    cohesionGraphInfoEl.textContent = "No contributor nodes available for this repository.";
+    cohesionGraphEl.innerHTML = '<div class="graph-empty">No graph data.</div>';
+    graphCard.classList.remove("hidden");
+    return;
+  }
+
+  const visNodes = nodes.map((n) => ({
+    id: n.id,
+    label: n.label || n.id,
+    value: 4 + Math.min(n.followers || 0, 20),
+    title: `${n.id}<br>followers: ${n.followers ?? 0} · following: ${n.following ?? 0}`,
+  }));
+  const visEdges = edges
+    .filter((e) => e && e.from && e.to)
+    .map((e) => ({ from: e.from, to: e.to, arrows: "to" }));
+
+  cohesionGraphInfoEl.textContent = `${nodes.length} contributors · ${visEdges.length} follows edges (same nodes used for cohesion).`;
+
+  const data = {
+    nodes: new vis.DataSet(visNodes),
+    edges: new vis.DataSet(visEdges),
+  };
+  const options = {
+    nodes: { shape: "dot", scaling: { min: 8, max: 30 }, font: { size: 12 } },
+    edges: { arrows: { to: { enabled: true, scaleFactor: 0.8 } }, smooth: { type: "continuous" } },
+    physics: { solver: "barnesHut", stabilization: { iterations: 200 } },
+    interaction: { hover: true, tooltipDelay: 100, navigationButtons: true },
+  };
+  cohesionNetwork = new vis.Network(cohesionGraphEl, data, options);
+  graphCard.classList.remove("hidden");
+}
+
+const GEO_COUNTRY_PALETTE = [
+  "#43a047", "#1e88e5", "#ef6c00", "#8e24aa", "#d81b60",
+  "#00897b", "#fdd835", "#5c6bc0", "#fb8c00", "#26a69a",
+];
+
+function geoCountryColor(country, indexByCountry) {
+  const idx = indexByCountry.get(country) % GEO_COUNTRY_PALETTE.length;
+  return GEO_COUNTRY_PALETTE[idx];
+}
+
+function hideGeoGraph() {
+  if (geoNetwork) {
+    geoNetwork.destroy();
+    geoNetwork = null;
+  }
+  if (geoGraphEl) {
+    geoGraphEl.innerHTML = "";
+  }
+  if (geoGraphInfoEl) {
+    geoGraphInfoEl.textContent = "";
+  }
+  if (geoGraphLegendEl) {
+    geoGraphLegendEl.innerHTML = "";
+  }
+  if (geoGraphCard) {
+    geoGraphCard.classList.add("hidden");
+  }
+}
+
+function renderGeoGraph(graph) {
+  if (!geoGraphCard || !geoGraphEl || !geoGraphInfoEl) {
+    return;
+  }
+  hideGeoGraph();
+
+  const nodes = Array.isArray(graph?.nodes) ? graph.nodes : [];
+  const edges = Array.isArray(graph?.edges) ? graph.edges : [];
+
+  if (typeof vis === "undefined" || !vis.Network) {
+    geoGraphInfoEl.textContent = "Graph library unavailable (offline CDN). Metrics above are unaffected.";
+    geoGraphEl.innerHTML = '<div class="graph-empty">vis-network failed to load.</div>';
+    geoGraphCard.classList.remove("hidden");
+    return;
+  }
+
+  if (nodes.length === 0) {
+    geoGraphInfoEl.textContent = "No matched locations for this repository.";
+    geoGraphEl.innerHTML = '<div class="graph-empty">No geographic graph data.</div>';
+    geoGraphCard.classList.remove("hidden");
+    return;
+  }
+
+  const indexByCountry = new Map();
+  nodes.forEach((n) => {
+    const country = (n.country || "unknown").toLowerCase();
+    if (!indexByCountry.has(country)) {
+      indexByCountry.set(country, indexByCountry.size);
+    }
+  });
+
+  const visNodes = nodes.map((n) => {
+    const country = (n.country || "unknown").toLowerCase();
+    return {
+      id: n.login,
+      label: n.login,
+      color: geoCountryColor(country, indexByCountry),
+      title: `${n.login}<br>${country}<br>lat: ${Number(n.latitude).toFixed(2)}, lon: ${Number(n.longitude).toFixed(2)}`,
+    };
+  });
+  const visEdges = edges
+    .filter((e) => e && e.from && e.to)
+    .map((e) => {
+      const nearby = e.type === "nearby";
+      return {
+        from: e.from,
+        to: e.to,
+        color: nearby ? "#ef6c00" : "#43a047",
+        dashes: nearby,
+        title: `${e.type} · ${Number(e.distance_km).toFixed(0)} km`,
+      };
+    });
+
+  const sameCount = edges.filter((e) => e.type === "same_country").length;
+  const nearbyCount = edges.filter((e) => e.type === "nearby").length;
+  geoGraphInfoEl.textContent = `${nodes.length} located contributors · ${indexByCountry.size} countries · ${sameCount} same-country + ${nearbyCount} nearby edges.`;
+
+  geoGraphLegendEl.innerHTML = "";
+  indexByCountry.forEach((idx, country) => {
+    const item = document.createElement("span");
+    item.className = "graph-legend-item";
+    const dot = document.createElement("span");
+    dot.className = "graph-legend-dot";
+    dot.style.background = GEO_COUNTRY_PALETTE[idx % GEO_COUNTRY_PALETTE.length];
+    const label = document.createElement("span");
+    label.textContent = country;
+    item.append(dot, label);
+    geoGraphLegendEl.appendChild(item);
+  });
+  const edgeLegend = document.createElement("span");
+  edgeLegend.className = "graph-legend-item";
+  edgeLegend.innerHTML = '<span class="graph-legend-line"></span><span>same country</span>';
+  const nearbyLegend = document.createElement("span");
+  nearbyLegend.className = "graph-legend-item";
+  nearbyLegend.innerHTML = '<span class="graph-legend-line nearby"></span><span>nearby &lt;500 km</span>';
+  geoGraphLegendEl.append(edgeLegend, nearbyLegend);
+
+  const data = {
+    nodes: new vis.DataSet(visNodes),
+    edges: new vis.DataSet(visEdges),
+  };
+  const options = {
+    nodes: { shape: "dot", size: 14, font: { size: 12 } },
+    edges: { smooth: { type: "continuous" } },
+    physics: { solver: "barnesHut", stabilization: { iterations: 200 } },
+    interaction: { hover: true, tooltipDelay: 100, navigationButtons: true },
+  };
+  geoNetwork = new vis.Network(geoGraphEl, data, options);
+  geoGraphCard.classList.remove("hidden");
 }
 
 function showError(msg) {

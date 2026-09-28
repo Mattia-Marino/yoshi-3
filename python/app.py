@@ -150,13 +150,39 @@ class ProcessorServicer(processor_pb2_grpc.ProcessorServiceServicer):
             # Compute cohesion metric
             cohesion_score = CohesionCalculator.compute(repo_data)
             logger.info(f"Computed cohesion score: {cohesion_score}")
+
+            # Build geographic proximity typed graph (reuses matched locations)
+            geo_graph_data = GeodispersionCalculator.build_graph(repo_data)
+            geo_graph_proto = processor_pb2.GeoGraph(
+                nodes=[
+                    processor_pb2.GeoNode(
+                        login=n["login"],
+                        country=n["country"],
+                        latitude=n["latitude"],
+                        longitude=n["longitude"],
+                    )
+                    for n in geo_graph_data["nodes"]
+                ],
+                edges=[
+                    processor_pb2.GeoEdge(
+                        **{
+                            "from": e["from"],
+                            "to": e["to"],
+                            "type": e["type"],
+                            "distance_km": e["distance_km"],
+                        }
+                    )
+                    for e in geo_graph_data["edges"]
+                ],
+            )
             
             # Return response with all metrics
             return processor_pb2.ProcessResponse(
                 formality=formality_score,
                 geodispersion=geodispersion_score,
                 longevity=longevity_score,
-                cohesion=cohesion_score
+                cohesion=cohesion_score,
+                geo_graph=geo_graph_proto
             )
             
         except Exception as e:

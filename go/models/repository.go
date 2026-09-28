@@ -20,6 +20,7 @@ type RepositoryInfo struct {
 	PullRequests                  []PullRequestInfo   `json:"pull_requests"`
 	Milestones                    int                 `json:"milestones"`
 	Contributors                  []ContributorDetail `json:"contributors"`
+	FollowEdges                 []FollowEdge        `json:"follow_edges"`
 	TotalContributorsCount        int                 `json:"total_contributors_count"`
 	NonAnonymousContributorsCount int                 `json:"non_anonymous_contributors_count"`
 	SelectedContributorsCount     int                 `json:"selected_contributors_count"`

@@ -38,11 +38,31 @@ func NewProcessorClient(addr string, logger *logrus.Logger) (*ProcessorClient, e
 }
 
 // ProcessResult holds the metrics returned from the gRPC service.
+type GeoGraphNode struct {
+	Login     string  `json:"login"`
+	Country   string  `json:"country"`
+	Latitude  float64 `json:"latitude"`
+	Longitude float64 `json:"longitude"`
+}
+
+type GeoGraphEdge struct {
+	From       string  `json:"from"`
+	To         string  `json:"to"`
+	Type       string  `json:"type"`
+	DistanceKm float64 `json:"distance_km"`
+}
+
+type GeoGraph struct {
+	Nodes []GeoGraphNode `json:"nodes"`
+	Edges []GeoGraphEdge `json:"edges"`
+}
+
 type ProcessResult struct {
-	Formality     float64 `json:"formality"`
-	Geodispersion float64 `json:"geodispersion"`
-	Longevity     float64 `json:"longevity"`
-	Cohesion      float64 `json:"cohesion"`
+	Formality     float64   `json:"formality"`
+	Geodispersion float64   `json:"geodispersion"`
+	Longevity     float64   `json:"longevity"`
+	Cohesion      float64   `json:"cohesion"`
+	GeoGraph      *GeoGraph `json:"geo_graph,omitempty"`
 }
 
 // Process sends repository data to the ProcessorService and returns computed metrics.
@@ -59,12 +79,40 @@ func (pc *ProcessorClient) Process(ctx context.Context, repoProto *pb.Repository
 		return nil, fmt.Errorf("gRPC Process call failed: %w", err)
 	}
 
-	return &ProcessResult{
+	result := &ProcessResult{
 		Formality:     resp.Formality,
 		Geodispersion: resp.Geodispersion,
 		Longevity:     resp.Longevity,
 		Cohesion:      resp.Cohesion,
-	}, nil
+	}
+	if resp.GeoGraph != nil {
+		geo := &GeoGraph{}
+		for _, n := range resp.GeoGraph.Nodes {
+			geo.Nodes = append(geo.Nodes, GeoGraphNode{
+				Login:     n.Login,
+				Country:   n.Country,
+				Latitude:  n.Latitude,
+				Longitude: n.Longitude,
+			})
+		}
+		for _, e := range resp.GeoGraph.Edges {
+			geo.Edges = append(geo.Edges, GeoGraphEdge{
+				From:       e.From,
+				To:         e.To,
+				Type:       e.Type,
+				DistanceKm: e.DistanceKm,
+			})
+		}
+		if geo.Nodes == nil {
+			geo.Nodes = []GeoGraphNode{}
+		}
+		if geo.Edges == nil {
+			geo.Edges = []GeoGraphEdge{}
+		}
+		result.GeoGraph = geo
+	}
+
+	return result, nil
 }
 
 // Close gracefully shuts down the gRPC connection.

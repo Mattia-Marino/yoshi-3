@@ -220,6 +220,44 @@ func (h *Handler) respondWithError(w http.ResponseWriter, statusCode int, messag
 }
 
 // ProcessHandlerResponse represents the response from the /process endpoint
+type CohesionGraphNode struct {
+	ID        string  `json:"id"`
+	Label     string  `json:"label"`
+	Followers int     `json:"followers"`
+	Following int     `json:"following"`
+	Ratio     float64 `json:"ratio"`
+}
+
+type CohesionGraphEdge struct {
+	From string `json:"from"`
+	To   string `json:"to"`
+	Type string `json:"type"`
+}
+
+type CohesionGraph struct {
+	Nodes []CohesionGraphNode `json:"nodes"`
+	Edges []CohesionGraphEdge `json:"edges"`
+}
+
+type GeoProximityNode struct {
+	Login     string  `json:"login"`
+	Country   string  `json:"country"`
+	Latitude  float64 `json:"latitude"`
+	Longitude float64 `json:"longitude"`
+}
+
+type GeoProximityEdge struct {
+	From       string  `json:"from"`
+	To         string  `json:"to"`
+	Type       string  `json:"type"`
+	DistanceKm float64 `json:"distance_km"`
+}
+
+type GeoProximityGraph struct {
+	Nodes []GeoProximityNode `json:"nodes"`
+	Edges []GeoProximityEdge `json:"edges"`
+}
+
 type ProcessHandlerResponse struct {
 	Formality       float64 `json:"formality"`
 	Geodispersion   float64 `json:"geodispersion"`
@@ -229,12 +267,57 @@ type ProcessHandlerResponse struct {
 	Category        string  `json:"category,omitempty"`
 	Inactive        bool    `json:"inactive,omitempty"`
 	Reason          string  `json:"reason,omitempty"`
-	CommitsFound    int     `json:"commits_found"`
-	CommitsRequired int     `json:"commits_required"`
-	ActiveFound     int     `json:"active_found"`
-	ActiveRequired  int     `json:"active_required"`
-	Days            int     `json:"days"`
-	Error           string  `json:"error,omitempty"`
+	CommitsFound    int           `json:"commits_found"`
+	CommitsRequired int           `json:"commits_required"`
+	ActiveFound     int           `json:"active_found"`
+	ActiveRequired  int           `json:"active_required"`
+	Days            int           `json:"days"`
+	CohesionGraph   *CohesionGraph `json:"cohesion_graph,omitempty"`
+	GeoGraph        *GeoProximityGraph `json:"geo_graph,omitempty"`
+	Error           string        `json:"error,omitempty"`
+}
+
+func buildCohesionGraph(repoInfo models.RepositoryInfo) *CohesionGraph {
+	nodes := make([]CohesionGraphNode, 0, len(repoInfo.Contributors))
+	for _, c := range repoInfo.Contributors {
+		nodes = append(nodes, CohesionGraphNode{
+			ID:        c.Login,
+			Label:     c.Login,
+			Followers: c.Followers,
+			Following: c.Following,
+			Ratio:     c.FollowerFollowingRatio,
+		})
+	}
+	edges := make([]CohesionGraphEdge, 0, len(repoInfo.FollowEdges))
+	for _, e := range repoInfo.FollowEdges {
+		edges = append(edges, CohesionGraphEdge{From: e.From, To: e.To, Type: "follows"})
+	}
+	return &CohesionGraph{Nodes: nodes, Edges: edges}
+}
+
+func buildGeoProximityGraph(metrics *grpcclient.ProcessResult) *GeoProximityGraph {
+	if metrics == nil || metrics.GeoGraph == nil {
+		return &GeoProximityGraph{Nodes: []GeoProximityNode{}, Edges: []GeoProximityEdge{}}
+	}
+	nodes := make([]GeoProximityNode, 0, len(metrics.GeoGraph.Nodes))
+	for _, n := range metrics.GeoGraph.Nodes {
+		nodes = append(nodes, GeoProximityNode{
+			Login:     n.Login,
+			Country:   n.Country,
+			Latitude:  n.Latitude,
+			Longitude: n.Longitude,
+		})
+	}
+	edges := make([]GeoProximityEdge, 0, len(metrics.GeoGraph.Edges))
+	for _, e := range metrics.GeoGraph.Edges {
+		edges = append(edges, GeoProximityEdge{
+			From:       e.From,
+			To:         e.To,
+			Type:       e.Type,
+			DistanceKm: e.DistanceKm,
+		})
+	}
+	return &GeoProximityGraph{Nodes: nodes, Edges: edges}
 }
 
 // ProcessHandler handles the POST request for extracting and processing repository metrics
@@ -361,5 +444,7 @@ func (h *Handler) ProcessHandler(w http.ResponseWriter, r *http.Request) {
 		ActiveFound:     details.ActiveCount,
 		ActiveRequired:  details.MinActive,
 		Days:            details.Days,
+		CohesionGraph:   buildCohesionGraph(repoInfo),
+		GeoGraph:        buildGeoProximityGraph(metrics),
 	})
 }

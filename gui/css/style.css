@@ -604,6 +604,76 @@ button[type="submit"]:disabled {
   font-weight: 700;
 }
 
+/* ===== Cohesion graph ===== */
+.graph-card {
+  padding: 1.5rem 1.75rem;
+}
+
+.graph-subtitle {
+  color: var(--text-mid);
+  font-size: 0.8rem;
+  margin-bottom: 0.35rem;
+}
+
+.graph-info {
+  color: var(--green-dark);
+  font-size: 0.8rem;
+  font-weight: 600;
+  margin-bottom: 0.6rem;
+}
+
+.graph-container {
+  width: 100%;
+  height: 420px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fcfefc;
+}
+
+.graph-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--text-mid);
+  font-size: 0.875rem;
+  text-align: center;
+  padding: 1rem;
+}
+
+.graph-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.8rem;
+  margin-bottom: 0.6rem;
+  font-size: 0.75rem;
+  color: var(--text-mid);
+}
+
+.graph-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.graph-legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.graph-legend-line {
+  width: 18px;
+  height: 0;
+  display: inline-block;
+  border-top: 2px solid var(--green-mid);
+}
+
+.graph-legend-line.nearby {
+  border-top: 2px dashed #ef6c00;
+}
+
 /* ===== Error Card ===== */
 .error-card {
   background: var(--red-light);

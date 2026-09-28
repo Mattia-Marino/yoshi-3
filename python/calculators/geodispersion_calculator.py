@@ -507,6 +507,94 @@ class GeodispersionCalculator:
     _MAX_GEO_DISTANCE_KM = 20015.0       # Half Earth circumference
     _MAX_CULTURAL_DISTANCE = 200.0       # Empirical max across 6 Hofstede dims (each 0-100)
 
+    # Distance below which contributors in different countries count as "nearby"
+    _NEARBY_KM = 500.0
+
+    @classmethod
+    def match_contributors(cls, repo_data: Dict) -> List[Dict]:
+        """
+        Match every contributor location to cities.csv.
+
+        Returns a list of dicts with login, country, latitude, longitude
+        for contributors whose location could be matched. Unmatched
+        contributors are skipped (no extra GitHub scraping involved).
+        """
+        if "repository" in repo_data:
+            repo = repo_data["repository"]
+        else:
+            repo = repo_data
+
+        matched = []
+        for contributor in repo.get("contributors", []):
+            login = contributor.get("login", "unknown")
+            location_str = contributor.get("location", "")
+            if not location_str:
+                continue
+            match = cls._match_location(location_str)
+            if match:
+                matched.append({
+                    "login": login,
+                    "country": match["country"],
+                    "latitude": match["latitude"],
+                    "longitude": match["longitude"],
+                })
+        return matched
+
+    @classmethod
+    def build_graph(cls, repo_data: Dict) -> Dict:
+        """
+        Build the geographic proximity typed graph.
+
+        Nodes are contributors with a matched location.
+        Edges are typed:
+          - "same_country": both contributors matched to the same country
+          - "nearby": different countries but haversine distance < _NEARBY_KM
+        Far cross-country pairs get no edge (that sparsity is the signal).
+        """
+        matched = cls.match_contributors(repo_data)
+
+        nodes = [
+            {
+                "login": m["login"],
+                "country": m["country"],
+                "latitude": m["latitude"],
+                "longitude": m["longitude"],
+            }
+            for m in matched
+        ]
+
+        edges = []
+        n = len(matched)
+        for i in range(n):
+            for j in range(i + 1, n):
+                a, b = matched[i], matched[j]
+                if a["country"] == b["country"]:
+                    edges.append({
+                        "from": a["login"],
+                        "to": b["login"],
+                        "type": "same_country",
+                        "distance_km": cls._haversine_distance(
+                            a["latitude"], a["longitude"],
+                            b["latitude"], b["longitude"],
+                        ),
+                    })
+                else:
+                    dist = cls._haversine_distance(
+                        a["latitude"], a["longitude"],
+                        b["latitude"], b["longitude"],
+                    )
+                    if dist < cls._NEARBY_KM:
+                        edges.append({
+                            "from": a["login"],
+                            "to": b["login"],
+                            "type": "nearby",
+                            "distance_km": dist,
+                        })
+
+        edges.sort(key=lambda e: (e["from"], e["to"]))
+        logger.info(f"Built geo graph: {len(nodes)} nodes, {len(edges)} edges")
+        return {"nodes": nodes, "edges": edges}
+
     @classmethod
     def compute(cls, repo_data: Dict) -> float:
         """

@@ -110,10 +110,33 @@ message ProcessRequest {
     Repository repository = 1;
 }
 
+// Geographic proximity graph node: one per contributor with matched location
+message GeoNode {
+    string login = 1;
+    string country = 2;
+    double latitude = 3;
+    double longitude = 4;
+}
+
+// Typed geographic edge between two contributors
+message GeoEdge {
+    string from = 1;
+    string to = 2;
+    string type = 3;         // "same_country" or "nearby"
+    double distance_km = 4;
+}
+
+// Geographic proximity graph of repository contributors
+message GeoGraph {
+    repeated GeoNode nodes = 1;
+    repeated GeoEdge edges = 2;
+}
+
 // Process response containing computed metrics
 message ProcessResponse {
     double formality = 1;
     double geodispersion = 2;
     double longevity = 3;
     double cohesion = 4;
+    GeoGraph geo_graph = 5;
 }

@@ -4,6 +4,14 @@ import (
 	"time"
 )
 
+// FollowEdge is a directed follow relationship inside the extracted community.
+// From follows To (both are contributor logins).
+type FollowEdge struct {
+	From string `json:"from"`
+	To   string `json:"to"`
+	Type string `json:"type"`
+}
+
 // ContributorDetail holds public profile data for a GitHub user (contributor).
 type ContributorDetail struct {
 	Login     string `json:"login"`
