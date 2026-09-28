@@ -39,6 +39,37 @@ const geoGraphEl = document.getElementById("geo-graph");
 const geoGraphInfoEl = document.getElementById("geo-graph-info");
 const geoGraphLegendEl = document.getElementById("geo-graph-legend");
 let geoNetwork = null;
+const coActivityGraphCard = document.getElementById("coactivity-graph-card");
+const coActivityGraphEl = document.getElementById("coactivity-graph");
+const coActivityGraphInfoEl = document.getElementById("coactivity-graph-info");
+let coActivityNetwork = null;
+const coActivityMinWeightInput = document.getElementById("coactivity-min-weight");
+const coActivityMinWeightValueEl = document.getElementById("coactivity-min-weight-value");
+let coActivityBaseNodes = [];
+let coActivityBaseEdges = [];
+let coActivityMaxWeight = 1;
+let coActivityNodesDS = null;
+let coActivityEdgesDS = null;
+
+// La fisica serve solo per il layout iniziale: a stabilizzazione finita la
+// si spegne, cosi il grafo resta fermo (niente piu "palla impazzita") ma i
+// nodi restano trascinabili a mano. Vale per tutti e tre i grafi.
+function freezeAfterStabilization(network) {
+  if (!network || typeof network.on !== "function") {
+    return;
+  }
+  const done = () => {
+    if (typeof network.off === "function") {
+      network.off("stabilizationIterationsDone", done);
+    }
+    network.setOptions({ physics: false });
+  };
+  network.on("stabilizationIterationsDone", done);
+}
+
+if (coActivityMinWeightInput) {
+  coActivityMinWeightInput.addEventListener("input", applyCoActivityFilter);
+}
 
 const soundHome = document.getElementById("sound-home");
 const soundEnter = document.getElementById("sound-enter");
@@ -101,6 +132,7 @@ document.getElementById("home-btn").addEventListener("click", (e) => {
   hideError();
   hideCohesionGraph();
   hideGeoGraph();
+  hideCoActivityGraph();
 });
 
 paramsToggleBtn.addEventListener("click", toggleParamsDrawer);
@@ -128,6 +160,7 @@ form.addEventListener("submit", async (e) => {
   hideError();
   hideCohesionGraph();
   hideGeoGraph();
+  hideCoActivityGraph();
 
   try {
     let res;
@@ -219,6 +252,7 @@ function showResults(data) {
   resultsCard.classList.remove("hidden");
   renderCohesionGraph(data.cohesion_graph);
   renderGeoGraph(data.geo_graph);
+  renderCoActivityGraph(data.coactivity_graph);
 }
 
 function showSimpleProjectResults(data) {
@@ -238,6 +272,7 @@ function showSimpleProjectResults(data) {
   resultsCard.classList.remove("hidden");
   hideCohesionGraph();
   hideGeoGraph();
+  hideCoActivityGraph();
 }
 
 function showInactiveResults(data) {
@@ -259,6 +294,7 @@ function showInactiveResults(data) {
   resultsCard.classList.remove("hidden");
   hideCohesionGraph();
   hideGeoGraph();
+  hideCoActivityGraph();
 }
 
 function showInactiveSPResults(data) {
@@ -280,6 +316,7 @@ function showInactiveSPResults(data) {
   resultsCard.classList.remove("hidden");
   hideCohesionGraph();
   hideGeoGraph();
+  hideCoActivityGraph();
 }
 
 function capitalizeFirst(text) {
@@ -334,8 +371,9 @@ function renderCohesionGraph(graph) {
   if (!graphCard || !cohesionGraphEl || !cohesionGraphInfoEl) {
     return;
   }
+  // NB: pulisce solo il proprio grafo; gli altri li gestiscono
+  // hideResults/home/SP e il proprio render. Non cancellare gli altri qui.
   hideCohesionGraph();
-  hideGeoGraph();
 
   const nodes = Array.isArray(graph?.nodes) ? graph.nodes : [];
   const edges = Array.isArray(graph?.edges) ? graph.edges : [];
@@ -377,6 +415,7 @@ function renderCohesionGraph(graph) {
     interaction: { hover: true, tooltipDelay: 100, navigationButtons: true },
   };
   cohesionNetwork = new vis.Network(cohesionGraphEl, data, options);
+  freezeAfterStabilization(cohesionNetwork);
   graphCard.classList.remove("hidden");
 }
 
@@ -442,11 +481,16 @@ function renderGeoGraph(graph) {
 
   const visNodes = nodes.map((n) => {
     const country = (n.country || "unknown").toLowerCase();
+    // "unknown" = senza location o non matchabile: grigio e isolato, ma
+    // visibile cosi il grafo non si svuota e si vede chi resta fuori.
+    const isUnknown = country === "unknown";
     return {
       id: n.login,
       label: n.login,
-      color: geoCountryColor(country, indexByCountry),
-      title: `${n.login}<br>${country}<br>lat: ${Number(n.latitude).toFixed(2)}, lon: ${Number(n.longitude).toFixed(2)}`,
+      color: isUnknown ? "#b0bec5" : geoCountryColor(country, indexByCountry),
+      title: isUnknown
+        ? `${n.login}<br>location unknown`
+        : `${n.login}<br>${country}<br>lat: ${Number(n.latitude).toFixed(2)}, lon: ${Number(n.longitude).toFixed(2)}`,
     };
   });
   const visEdges = edges
@@ -464,7 +508,8 @@ function renderGeoGraph(graph) {
 
   const sameCount = edges.filter((e) => e.type === "same_country").length;
   const nearbyCount = edges.filter((e) => e.type === "nearby").length;
-  geoGraphInfoEl.textContent = `${nodes.length} located contributors · ${indexByCountry.size} countries · ${sameCount} same-country + ${nearbyCount} nearby edges.`;
+  const unknownCount = nodes.filter((n) => (n.country || "unknown").toLowerCase() === "unknown").length;
+  geoGraphInfoEl.textContent = `${nodes.length} contributors · ${indexByCountry.size} countries · ${sameCount} same-country + ${nearbyCount} nearby edges · ${unknownCount} without location (grey).`;
 
   geoGraphLegendEl.innerHTML = "";
   indexByCountry.forEach((idx, country) => {
@@ -472,7 +517,7 @@ function renderGeoGraph(graph) {
     item.className = "graph-legend-item";
     const dot = document.createElement("span");
     dot.className = "graph-legend-dot";
-    dot.style.background = GEO_COUNTRY_PALETTE[idx % GEO_COUNTRY_PALETTE.length];
+    dot.style.background = country === "unknown" ? "#b0bec5" : GEO_COUNTRY_PALETTE[idx % GEO_COUNTRY_PALETTE.length];
     const label = document.createElement("span");
     label.textContent = country;
     item.append(dot, label);
@@ -497,7 +542,152 @@ function renderGeoGraph(graph) {
     interaction: { hover: true, tooltipDelay: 100, navigationButtons: true },
   };
   geoNetwork = new vis.Network(geoGraphEl, data, options);
+  freezeAfterStabilization(geoNetwork);
   geoGraphCard.classList.remove("hidden");
+}
+
+// Teoria (promemoria): questo grafo mostra la collaborazione PRATICATA nel
+// tempo, non relazioni dichiarate. Arco A-B = A e B attivi nelle stesse
+// settimane (peso = quante). Nucleo denso = team reale; nodi isolati =
+// comparse one-shot (problema di retention); coesione alta + co-attivita
+// frammentata = folla di solisti, non un team.
+function hideCoActivityGraph() {
+  if (coActivityNetwork) {
+    coActivityNetwork.destroy();
+    coActivityNetwork = null;
+  }
+  coActivityBaseNodes = [];
+  coActivityBaseEdges = [];
+  coActivityMaxWeight = 1;
+  coActivityNodesDS = null;
+  coActivityEdgesDS = null;
+  if (coActivityMinWeightInput) {
+    coActivityMinWeightInput.value = "0";
+  }
+  if (coActivityMinWeightValueEl) {
+    coActivityMinWeightValueEl.textContent = "1";
+  }
+  if (coActivityGraphEl) {
+    coActivityGraphEl.innerHTML = "";
+  }
+  if (coActivityGraphInfoEl) {
+    coActivityGraphInfoEl.textContent = "";
+  }
+  if (coActivityGraphCard) {
+    coActivityGraphCard.classList.add("hidden");
+  }
+}
+
+// Slider "min shared weeks": scala LOGARITMICA 0..100 -> 1..maxWeight.
+// I pesi vanno da 1 a centinaia di settimane: con scala lineare i primi
+// millimetri di slider brucerebbero decine di valori (troppo sensibile),
+// mentre in logaritmica meta corsa ~ radice del max. Nasconde gli archi
+// deboli senza rifare richieste: alzalo se il grafo e troppo denso.
+function coActivitySliderToWeight() {
+  const pos = Math.min(100, Math.max(0, Number(coActivityMinWeightInput.value) || 0));
+  if (pos <= 0) {
+    return 1;
+  }
+  const w = Math.exp((Math.log(coActivityMaxWeight) * pos) / 100);
+  return Math.min(coActivityMaxWeight, Math.max(1, Math.round(w)));
+}
+
+function applyCoActivityFilter() {
+  if (!coActivityNodesDS || !coActivityEdgesDS || !coActivityMinWeightInput) {
+    return;
+  }
+  const minW = coActivitySliderToWeight();
+  coActivityMinWeightValueEl.textContent = String(minW);
+
+  const visible = coActivityBaseEdges.filter((e) => e.weight >= minW);
+  const linked = new Set();
+  visible.forEach((e) => {
+    linked.add(e.from);
+    linked.add(e.to);
+  });
+
+  coActivityNodesDS.clear();
+  coActivityNodesDS.add(
+    coActivityBaseNodes.map((n) => ({
+      id: n.id,
+      label: n.label,
+      // Dimensione nodo = settimane attive (presenza nel tempo, non volume).
+      value: 4 + Math.min(n.activeWeeks || 0, 30),
+      color: linked.has(n.id) ? "#43a047" : "#b0bec5",
+      title: `${n.id}<br>active weeks: ${n.activeWeeks ?? 0} · commits: ${n.totalCommits ?? 0}`,
+    }))
+  );
+  coActivityEdgesDS.clear();
+  coActivityEdgesDS.add(
+    visible.map((e) => ({
+      from: e.from,
+      to: e.to,
+      // Spessore arco = settimane in comune (collaborazione praticata).
+      width: 1 + Math.min(e.weight || 1, 12) / 2,
+      title: `${e.from} ↔ ${e.to}<br>${e.weight} shared weeks (${e.type})`,
+    }))
+  );
+
+  coActivityGraphInfoEl.textContent =
+    `${coActivityBaseNodes.length} contributors (top by commits) · ` +
+    `${visible.length}/${coActivityBaseEdges.length} edges ≥ ${minW} shared weeks · ` +
+    `${coActivityBaseNodes.length - linked.size} isolated (grey).`;
+}
+
+function renderCoActivityGraph(graph) {
+  if (!coActivityGraphCard || !coActivityGraphEl || !coActivityGraphInfoEl) {
+    return;
+  }
+  // NB: pulisce solo il proprio grafo (vedi nota in renderCohesionGraph).
+  hideCoActivityGraph();
+
+  const nodes = Array.isArray(graph?.nodes) ? graph.nodes : [];
+  const edges = Array.isArray(graph?.edges) ? graph.edges : [];
+
+  if (typeof vis === "undefined" || !vis.Network) {
+    coActivityGraphInfoEl.textContent = "Graph library unavailable (offline CDN). Metrics above are unaffected.";
+    coActivityGraphEl.innerHTML = '<div class="graph-empty">vis-network failed to load.</div>';
+    coActivityGraphCard.classList.remove("hidden");
+    return;
+  }
+
+  if (nodes.length === 0) {
+    coActivityGraphInfoEl.textContent = "No activity data (GitHub may still be computing contributor stats).";
+    coActivityGraphEl.innerHTML = '<div class="graph-empty">No co-activity data.</div>';
+    coActivityGraphCard.classList.remove("hidden");
+    return;
+  }
+
+  coActivityBaseNodes = nodes.map((n) => ({
+    id: n.id,
+    label: n.label || n.id,
+    activeWeeks: n.active_weeks || 0,
+    totalCommits: n.total_commits || 0,
+  }));
+  coActivityBaseEdges = edges
+    .filter((e) => e && e.from && e.to)
+    .map((e) => ({ from: e.from, to: e.to, type: e.type || "co_active", weight: e.weight || 1 }));
+
+  coActivityMaxWeight = Math.max(1, ...coActivityBaseEdges.map((e) => e.weight));
+  coActivityMinWeightInput.value = "0";
+
+  coActivityNodesDS = new vis.DataSet([]);
+  coActivityEdgesDS = new vis.DataSet([]);
+  const data = { nodes: coActivityNodesDS, edges: coActivityEdgesDS };
+  const options = {
+    nodes: { shape: "dot", scaling: { min: 8, max: 30 }, font: { size: 12 } },
+    edges: { color: "#43a047", smooth: { type: "continuous" } },
+    physics: {
+      solver: "barnesHut",
+      barnesHut: { springLength: 160, damping: 0.15 },
+      stabilization: { iterations: 500 },
+    },
+    interaction: { hover: true, tooltipDelay: 100, navigationButtons: true },
+  };
+  coActivityNetwork = new vis.Network(coActivityGraphEl, data, options);
+  freezeAfterStabilization(coActivityNetwork);
+  applyCoActivityFilter();
+  coActivityGraphCard.classList.remove("hidden");
 }
 
 function showError(msg) {

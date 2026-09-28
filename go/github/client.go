@@ -322,26 +322,22 @@ func (c *Client) GetRepositoryInfo(owner, repo string) models.RepositoryInfo {
 			info.Contributors = withLocation
 			info.ContributorsWithLocationCount = len(withLocation)
 
-			// Keep only edges between contributors retained for the cohesion
-			// computation (same node set Python receives).
-			kept := make(map[string]struct{}, len(withLocation))
-			for _, d := range withLocation {
-				kept[strings.ToLower(d.Login)] = struct{}{}
-			}
-			filtered := make([]models.FollowEdge, 0, len(followEdges))
-			for _, e := range followEdges {
-				if _, ok := kept[strings.ToLower(e.From)]; !ok {
+			// I grafi mostrano TUTTA la community (anche senza location):
+			// nodi = tutti i details validi, archi = tutti (non filtrati).
+			// Le metriche Python continuano a usare info.Contributors
+			// (solo con location): i punteggi non cambiano.
+			community := make([]models.ContributorDetail, 0, len(details))
+			for _, d := range details {
+				if d.Login == "" {
 					continue
 				}
-				if _, ok := kept[strings.ToLower(e.To)]; !ok {
-					continue
-				}
-				filtered = append(filtered, e)
+				community = append(community, d)
 			}
-			if filtered == nil {
-				filtered = []models.FollowEdge{}
+			info.CommunityContributors = community
+			if followEdges == nil {
+				followEdges = []models.FollowEdge{}
 			}
-			info.FollowEdges = filtered
+			info.FollowEdges = followEdges
 		}
 	}
 

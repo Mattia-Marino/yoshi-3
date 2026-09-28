@@ -674,6 +674,21 @@ button[type="submit"]:disabled {
   border-top: 2px dashed #ef6c00;
 }
 
+.coactivity-filter {
+  margin-bottom: 0.6rem;
+  max-width: 320px;
+}
+
+.coactivity-filter label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-mid);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  margin-bottom: 0;
+  white-space: nowrap;
+}
+
 /* ===== Error Card ===== */
 .error-card {
   background: var(--red-light);

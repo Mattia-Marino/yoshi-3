@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"runtime"
+	"sort"
 
 	"github-extractor/github"
 	"github-extractor/grpcclient"
@@ -258,6 +259,43 @@ type GeoProximityGraph struct {
 	Edges []GeoProximityEdge `json:"edges"`
 }
 
+// ---------------------------------------------------------------------------
+// Grafo di co-attivita temporale (teoria):
+// - NON dice "chi segue chi" (quello e il grafo di coesione, relazione
+//   dichiarata e permanente), ma "chi codifica insieme a chi, quando"
+//   (collaborazione praticata nel tempo).
+// - Due contributor collegati hanno committato nelle stesse settimane: con
+//   buona probabilita lavoravano sullo stesso stato del progetto.
+// - Come leggerlo: nucleo denso = team reale (ma fragile se piccolo);
+//   nodi isolati = comparse one-shot (problema di retention, non di
+//   visibilita); gruppetti separati = sottogruppi/silos; archi che si
+//   spostano dai vecchi ai nuovi = passaggio di testimone sano.
+// - Coesione alta + co-attivita frammentata = folla di solisti, non un team.
+// ---------------------------------------------------------------------------
+type CoActivityNode struct {
+	ID           string `json:"id"`
+	Label        string `json:"label"`
+	ActiveWeeks  int    `json:"active_weeks"`
+	TotalCommits int    `json:"total_commits"`
+}
+
+type CoActivityEdge struct {
+	From   string `json:"from"`
+	To     string `json:"to"`
+	Type   string `json:"type"`
+	Weight int    `json:"weight"`
+}
+
+type CoActivityGraph struct {
+	Nodes []CoActivityNode `json:"nodes"`
+	Edges []CoActivityEdge `json:"edges"`
+}
+
+// maxCoActivityNodes limita i nodi ai piu attivi per commit: oltre questa
+// soglia il grafo diventa illeggibile e la risposta /process troppo pesante.
+// Gli esclusi sono quasi sempre comparse con 1-2 commit (nodi isolati).
+const maxCoActivityNodes = 60
+
 type ProcessHandlerResponse struct {
 	Formality       float64 `json:"formality"`
 	Geodispersion   float64 `json:"geodispersion"`
@@ -274,12 +312,20 @@ type ProcessHandlerResponse struct {
 	Days            int           `json:"days"`
 	CohesionGraph   *CohesionGraph `json:"cohesion_graph,omitempty"`
 	GeoGraph        *GeoProximityGraph `json:"geo_graph,omitempty"`
+	CoActivityGraph *CoActivityGraph `json:"coactivity_graph,omitempty"`
 	Error           string        `json:"error,omitempty"`
 }
 
 func buildCohesionGraph(repoInfo models.RepositoryInfo) *CohesionGraph {
-	nodes := make([]CohesionGraphNode, 0, len(repoInfo.Contributors))
-	for _, c := range repoInfo.Contributors {
+	// Nodi = TUTTA la community (anche senza location). Le metriche Python
+	// restano sul sottoinsieme con location: il punteggio non cambia, ma il
+	// grafo non si svuota sui repo con poche location compilate.
+	members := repoInfo.CommunityContributors
+	if len(members) == 0 {
+		members = repoInfo.Contributors
+	}
+	nodes := make([]CohesionGraphNode, 0, len(members))
+	for _, c := range members {
 		nodes = append(nodes, CohesionGraphNode{
 			ID:        c.Login,
 			Label:     c.Login,
@@ -295,29 +341,120 @@ func buildCohesionGraph(repoInfo models.RepositoryInfo) *CohesionGraph {
 	return &CohesionGraph{Nodes: nodes, Edges: edges}
 }
 
-func buildGeoProximityGraph(metrics *grpcclient.ProcessResult) *GeoProximityGraph {
-	if metrics == nil || metrics.GeoGraph == nil {
-		return &GeoProximityGraph{Nodes: []GeoProximityNode{}, Edges: []GeoProximityEdge{}}
+func buildGeoProximityGraph(metrics *grpcclient.ProcessResult, repoInfo models.RepositoryInfo) *GeoProximityGraph {
+	nodes := []GeoProximityNode{}
+	edges := []GeoProximityEdge{}
+	if metrics != nil && metrics.GeoGraph != nil {
+		for _, n := range metrics.GeoGraph.Nodes {
+			nodes = append(nodes, GeoProximityNode{
+				Login:     n.Login,
+				Country:   n.Country,
+				Latitude:  n.Latitude,
+				Longitude: n.Longitude,
+			})
+		}
+		for _, e := range metrics.GeoGraph.Edges {
+			edges = append(edges, GeoProximityEdge{
+				From:       e.From,
+				To:         e.To,
+				Type:       e.Type,
+				DistanceKm: e.DistanceKm,
+			})
+		}
 	}
-	nodes := make([]GeoProximityNode, 0, len(metrics.GeoGraph.Nodes))
-	for _, n := range metrics.GeoGraph.Nodes {
-		nodes = append(nodes, GeoProximityNode{
-			Login:     n.Login,
-			Country:   n.Country,
-			Latitude:  n.Latitude,
-			Longitude: n.Longitude,
-		})
+	// Chi non ha location (o non matchabile su cities.csv) non puo stare
+	// sulla mappa, ma va mostrato lo stesso: nodi grigi isolati di tipo
+	// "unknown". Cosi il grafo non si svuota e si vede quanta community
+	// resta fuori dall'analisi geografica.
+	placed := make(map[string]struct{}, len(nodes))
+	for _, n := range nodes {
+		placed[n.Login] = struct{}{}
 	}
-	edges := make([]GeoProximityEdge, 0, len(metrics.GeoGraph.Edges))
-	for _, e := range metrics.GeoGraph.Edges {
-		edges = append(edges, GeoProximityEdge{
-			From:       e.From,
-			To:         e.To,
-			Type:       e.Type,
-			DistanceKm: e.DistanceKm,
-		})
+	members := repoInfo.CommunityContributors
+	if len(members) == 0 {
+		members = repoInfo.Contributors
 	}
+	for _, c := range members {
+		if _, ok := placed[c.Login]; ok {
+			continue
+		}
+		nodes = append(nodes, GeoProximityNode{Login: c.Login, Country: "unknown"})
+		placed[c.Login] = struct{}{}
+	}
+	sort.Slice(nodes, func(i, j int) bool { return nodes[i].Login < nodes[j].Login })
 	return &GeoProximityGraph{Nodes: nodes, Edges: edges}
+}
+
+// buildCoActivityGraph costruisce la rete di collaborazione temporale.
+// Per ogni contributor considera l'insieme delle settimane attive (da
+// ContributorStats, gia scaricato nello scraping unico: zero quota extra).
+// Un arco "co_active" A-B con peso N significa: A e B hanno committato
+// insieme in N settimane. Sviluppo futuro: pesare con Jaccard
+// (|A∩B|/|A∪B|) per premiare chi lavora *sempre* insieme rispetto a chi si
+// incrocia una volta sola.
+func buildCoActivityGraph(repoInfo models.RepositoryInfo) *CoActivityGraph {
+	stats := append([]models.ContributorStats(nil), repoInfo.ContributorStats...)
+	sort.Slice(stats, func(i, j int) bool {
+		if stats[i].Total == stats[j].Total {
+			return stats[i].Author < stats[j].Author
+		}
+		return stats[i].Total > stats[j].Total
+	})
+	if len(stats) > maxCoActivityNodes {
+		stats = stats[:maxCoActivityNodes]
+	}
+
+	activeWeeks := make(map[string]map[int64]struct{}, len(stats))
+	totals := make(map[string]int, len(stats))
+	for _, s := range stats {
+		set, ok := activeWeeks[s.Author]
+		if !ok {
+			set = make(map[int64]struct{})
+			activeWeeks[s.Author] = set
+		}
+		for _, w := range s.Weeks {
+			if w.Commits > 0 {
+				set[w.WeekTimestamp] = struct{}{}
+			}
+		}
+		totals[s.Author] += s.Total
+	}
+
+	nodes := make([]CoActivityNode, 0, len(activeWeeks))
+	for author, set := range activeWeeks {
+		nodes = append(nodes, CoActivityNode{
+			ID:           author,
+			Label:        author,
+			ActiveWeeks:  len(set),
+			TotalCommits: totals[author],
+		})
+	}
+	sort.Slice(nodes, func(i, j int) bool { return nodes[i].ID < nodes[j].ID })
+
+	edges := []CoActivityEdge{}
+	for i := range nodes {
+		for j := i + 1; j < len(nodes); j++ {
+			overlap := 0
+			setA, setB := activeWeeks[nodes[i].ID], activeWeeks[nodes[j].ID]
+			if len(setA) > len(setB) {
+				setA, setB = setB, setA
+			}
+			for week := range setA {
+				if _, ok := setB[week]; ok {
+					overlap++
+				}
+			}
+			if overlap > 0 {
+				edges = append(edges, CoActivityEdge{
+					From:   nodes[i].ID,
+					To:     nodes[j].ID,
+					Type:   "co_active",
+					Weight: overlap,
+				})
+			}
+		}
+	}
+	return &CoActivityGraph{Nodes: nodes, Edges: edges}
 }
 
 // ProcessHandler handles the POST request for extracting and processing repository metrics
@@ -445,6 +582,7 @@ func (h *Handler) ProcessHandler(w http.ResponseWriter, r *http.Request) {
 		ActiveRequired:  details.MinActive,
 		Days:            details.Days,
 		CohesionGraph:   buildCohesionGraph(repoInfo),
-		GeoGraph:        buildGeoProximityGraph(metrics),
+		GeoGraph:        buildGeoProximityGraph(metrics, repoInfo),
+		CoActivityGraph: buildCoActivityGraph(repoInfo),
 	})
 }

@@ -20,6 +20,11 @@ type RepositoryInfo struct {
 	PullRequests                  []PullRequestInfo   `json:"pull_requests"`
 	Milestones                    int                 `json:"milestones"`
 	Contributors                  []ContributorDetail `json:"contributors"`
+	// CommunityContributors e TUTTA la community analizzata (con e senza
+	// location), con conteggi follower/following interni. Serve ai grafi,
+	// che devono mostrare tutti - non solo il sottoinsieme con location
+	// usato per le metriche Python (info.Contributors).
+	CommunityContributors       []ContributorDetail `json:"community_contributors"`
 	FollowEdges                 []FollowEdge        `json:"follow_edges"`
 	TotalContributorsCount        int                 `json:"total_contributors_count"`
 	NonAnonymousContributorsCount int                 `json:"non_anonymous_contributors_count"`

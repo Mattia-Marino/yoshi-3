@@ -186,6 +186,23 @@
           <div class="graph-legend" id="geo-graph-legend"></div>
           <div class="graph-container" id="geo-graph"></div>
         </section>
+
+        <!-- Typed graph: temporal co-activity, same /process response.
+             Theory: edge = contributors active in the same weeks (real
+             collaboration), NOT follows (declared relations). Dense core =
+             real team; isolated nodes = one-shot contributors (retention
+             issue); high cohesion + fragmented co-activity = crowd, not team. -->
+        <section class="card graph-card hidden" id="coactivity-graph-card">
+          <h2>Co-activity Graph</h2>
+          <p class="graph-subtitle">Nodes = contributors (size = active weeks). Edge A — B = active in the same weeks (type: co_active, thickness = n. shared weeks).</p>
+          <p class="graph-info" id="coactivity-graph-info"></p>
+          <div class="threshold-control coactivity-filter">
+            <label for="coactivity-min-weight">Min shared weeks (log)</label>
+            <input type="range" id="coactivity-min-weight" min="0" max="100" step="1" value="0" />
+            <span class="threshold-value" id="coactivity-min-weight-value">1</span>
+          </div>
+          <div class="graph-container" id="coactivity-graph"></div>
+        </section>
       </div>
 
       <aside class="analysis-right" id="analysis-right-panel">
