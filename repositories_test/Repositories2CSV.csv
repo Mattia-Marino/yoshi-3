@@ -1,5 +1,5 @@
 Owner/Repo;Geodispersion;Formality;Longevity;Cohesion
-traefik/trafik;0,3304;0,95;0,6111;0,0177
+traefik/traefik;0,3304;0,95;0,6111;0,0177
 caddyserver/caddy;0,3532;0,59;0,5146;0,0117
 pallets/flask;0,3292;0,7;0,4678;0,0642
 postalserver/postal;0,1384;0,44;0,3387;0,1
