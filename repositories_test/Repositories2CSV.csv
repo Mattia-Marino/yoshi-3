@@ -43,3 +43,6 @@ huggingface/transformers;0,3383;0,72;0,7391;0,0188
 google/jax;0,3025;0,52;0,4637;0,0112
 flutter/flutter;0,3779;0,75;0,7914;0,0176
 numpy/numpy;0,3696;0,7500;0,5829;0,0111
+apache/camel-k;0,3239;0,5900;0,5281;0,0285
+pytorch/vision;0,3590;0,7500;0,5716;0,1023
+kubernetes/kubernetes;0,3503;0,7700;0,7404;0,0118
