@@ -7,7 +7,7 @@ models = [
     "DeepSeek V4.1 Flash",
     "GPT-6",
     "Gemini",
-    "Claude"
+    "Sonnet5.5"
 ]
 
 coerente = [77, 67, 69, 65]
