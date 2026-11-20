@@ -2,7 +2,7 @@ from pathlib import Path
 import subprocess
 import sys
 
-FILE_LISTA = Path(r"C:\Users\geppe\Desktop\Cloning_repo\toClone.txt")
+FILE_LISTA = Path(r"C:\Users\geppe\Desktop\toClone.txt")
 CARTELLA_DESTINAZIONE = Path(r"C:\Users\geppe\Desktop\Cloning_repo")
 
 
