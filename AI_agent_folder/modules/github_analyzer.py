@@ -20,43 +20,93 @@ Regole temporali:
   - una PR/Issue e' "del periodo" solo se CREATA nella finestra;
     elementi creati prima non entrano nei conteggi anche se chiusi/uniti dopo;
   - le metriche di durata usano solo elementi creati nella finestra il cui evento
-    conclusivo (chiusura/merge/primaa review) avviene entro la fine della finestra;
+    conclusivo (chiusura/merge/prima review) avviene entro la fine della finestra;
   - le review contano in base a submitted_at (una review inviata prima di T_1
     non viene attribuita a T+6).
 
-Metriche (per ogni finestra, colonne *_pre e *_post):
-  PR    : aperte, chiuse, merged, aperte alla fine, % merge (su chiuse),
-          tempo medio di merge, contributori, media additions/deletions/totale;
-  Issue : aperte, chiuse, tempo medio di chiusura, contributori,
-          commenti medi, % chiusura (su aperte);
-  Review: totale, reviewer distinti, review per PR (su PR create nella finestra),
-          APPROVED, CHANGES_REQUESTED, tempo medio alla prima review.
+Metriche (esattamente 14, per ogni finestra, colonne *_pre e *_post):
+  PR    (5): pr_aperte, pr_merged, pr_pct_merge (merged / PR create e chiuse
+             entro la fine della finestra), pr_tempo_medio_merge_giorni,
+             pr_contributori;
+  Issue (5): issue_aperte, issue_chiuse, issue_tempo_medio_chiusura_giorni,
+             issue_contributori, issue_pct_chiusura (chiuse / create);
+  Review(4): review_totale, review_reviewer_distinti, review_approvate,
+             review_tempo_medio_prima_review_giorni.
 
-Valori non calcolabili -> campo VUOTO (mai 0 al posto del mancante).
+Zero vs mancante:
+  - 0  = metrica calcolata correttamente e nessun evento;
+  - '' = non calcolabile (media senza elementi, percentuale con denominatore
+         zero) oppure dati non recuperati in modo completo (stato 'parziale').
 
-Limiti noti:
-  - le review vengono scaricate per le PR attive durante la finestra (aggiornate
-    entro la finestra): PR con zero attivita' nella finestra non possono aver
-    ricevuto review nella finestra, quindi l'insieme e' completo per lo scopo;
-  - le PR create nella finestra ma mai aggiornate dopo sono comunque inclusi
-    (created_at <= updated_at).
+Strategia di recupero (REST, completezza storica privilegiata):
+  - issue/PR create: GET /issues?state=all&sort=created&since=<T-6>,
+    paginato fino a created_at < T-6 (l'ordinamento discendente su created
+    garantisce di vedere tutti gli elementi creati nella finestra);
+  - PR candidate (metriche PR + review): GET /pulls?state=open a esaurimento
+    UNITO A GET /pulls?state=closed&sort=updated&direction=desc paginato fino
+    a updated_at < inizio T-6. Una PR che poteva ricevere review durante le
+    finestre doveva essere APERTA in quel periodo: se e' ancora aperta e'
+    nella prima lista; se e' chiusa ora, la chiusura finale e' avvenuta dopo
+    l'inizio della finestra e la chiusura e' essa stessa un aggiornamento
+    (updated_at >= closed_at), quindi rientra nella seconda lista.
+    NON si usa updated_at <= fine T+6: escluderebbe PR reviewate nella
+    finestra e poi aggiornate successivamente;
+  - le review si scaricano solo per le PR candidate (1 richiesta a PR,
+    paginata). Non si usano GET /pulls/{number}: i dettagli
+    additions/deletions non servono per le 14 metriche.
+  - paginazione: sui repository grandi (es. apache/airflow) l'API REST
+    risponde HTTP 422 'Pagination with the page parameter is not supported
+    for large datasets, please use cursor based pagination (after/before)':
+    paginate() parte con l'URL storico page=1 (compatibilita' cache), segue
+    l'header Link (cursore `after` preferito a `next`) e, di fronte al 422,
+    riparte da capo SENZA il parametro `page` seguendo i cursori, azzerando
+    l'elenco accumulato (nessun duplicato, nessuna omissione). Se anche i
+    cursori vengono rifiutati viene lanciato errore: l'elenco non recuperato
+    non viene mai presentato come completo.
 
-Token: variabile d'ambiente GITHUB_TOKEN (o GH_TOKEN). Mai scritto nel codice.
+Limiti metodologici (documentati, non eliminabili con le API REST):
+  - vale l'ipotesi di piattaforma "una PR puo' ricevere review solo se
+    aperta": se non valdesse, esisterebbero PR chiuse prima di T-6 con
+    review inviate nella finestra e non verrebbero recuperate;
+  - non esiste un endpoint "review inviate in un intervallo": ogni PR
+    candidate va interrogata singolarmente. Se il recupero delle review di
+    una PR fallisce, le 4 metriche review della finestra in cui quella PR
+    era aperta restano VUOTE e lo stato diventa 'parziale': non vengono mai
+    presentate come complete. Le metriche PR/Issue restano valide se il loro
+    recupero e' corretto;
+  - l'ordinamento delle liste e' stabile su created/updated: un numero di
+    pagine oltre MAX_PAGES genera errore (mai un elenco troncato presentato
+    come completo).
+
+Robustezza della connessione (GitHubClient.get):
+  - interruzioni temporanee (RemoteDisconnected, ConnectionResetError,
+    TimeoutError, URLError con motivo di rete): max 5 tentativi complessivi
+    con backoff progressivo 2, 4, 8, 16, 30 s;
+  - se tutti falliscono viene lanciato RuntimeError -> analyze_repo marca
+    'parziale'/'errore': una richiesta fallita non e' mai una risposta vuota
+    (recupero review fallito = 4 metriche review vuote, mai 0);
+  - HTTP 403/429, 5xx e rate limit: gestione invariata;
+  - gli URL gia' presenti in cache valida non vengono richiesti di nuovo.
+
+Token: variabile d'ambiente GITHUB_TOKEN, GH_TOKEN o YOSHI_GH_TOKEN.
+Mai scritto nel codice.
 
 Uso:
-  python github_analyzer.py --dry-run          # solo selezione + stima richieste
-  python github_analyzer.py                    # test completo su 5 repository
-  python github_analyzer.py --n 5 --concurrency 2
-  python github_analyzer.py --repo owner/a,owner/b
+  python github_analyzer.py --dry-run                  # solo stima richieste
+  python github_analyzer.py --repo owner/name          # test su un repository
+  python github_analyzer.py --repo owner/a,owner/b     # test su piu' repository
+  python github_analyzer.py --n 3                      # primi 3 idonei
 Output: results/github_metrics.csv
 """
 
 import argparse
 import csv
 import hashlib
+import http.client
 import json
 import os
 import re
+import ssl
 import subprocess
 import sys
 import threading
@@ -81,20 +131,26 @@ PER_PAGE = 100
 MIN_RATE_REMAINING = 50      # soglia: sotto, si attende il reset
 MAX_WAIT_RESET = 900         # secondi massimi di attesa per reset (poi si abortisce)
 MAX_RETRIES = 4
+MAX_PAGES = 5000             # oltre: la paginazione e' un errore, mai un troncamento
 
-# metriche nella ordine delle colonne del CSV
+# Interruzioni temporanee della connessione (RemoteDisconnected durante una
+# GET): massimo 5 tentativi complessivi con backoff progressivo di
+# 2, 4, 8, 16 e 30 secondi. Gli errori HTTP (403/429/5xx) e il rate limit
+# restano gestiti come prima (MAX_RETRIES).
+MAX_TRANSIENT_ATTEMPTS = 5
+TRANSIENT_BACKOFF = (2, 4, 8, 16, 30)   # secondi, un valore per tentativo
+
+# esattamente 14 metriche, nell'ordine delle colonne del CSV
 PR_METRICS = [
-    "pr_aperte", "pr_chiuse", "pr_merged", "pr_aperte_alla_fine",
-    "pr_pct_merge", "pr_tempo_medio_merge_giorni", "pr_contributori",
-    "pr_media_add", "pr_media_del", "pr_media_tot",
+    "pr_aperte", "pr_merged", "pr_pct_merge",
+    "pr_tempo_medio_merge_giorni", "pr_contributori",
 ]
 ISSUE_METRICS = [
     "issue_aperte", "issue_chiuse", "issue_tempo_medio_chiusura_giorni",
-    "issue_contributori", "issue_commenti_medi", "issue_pct_chiusura",
+    "issue_contributori", "issue_pct_chiusura",
 ]
 REVIEW_METRICS = [
-    "review_totale", "review_reviewer_distinti", "review_per_pr",
-    "review_approvate", "review_modifiche_richieste",
+    "review_totale", "review_reviewer_distinti", "review_approvate",
     "review_tempo_medio_prima_review_giorni",
 ]
 METRICS = PR_METRICS + ISSUE_METRICS + REVIEW_METRICS
@@ -102,7 +158,7 @@ METRICS = PR_METRICS + ISSUE_METRICS + REVIEW_METRICS
 FIELDS = (
     ["repository", "t1", "stato", "pre_start", "pre_end", "post_start", "post_end"]
     + [f"{m}_{s}" for m in METRICS for s in ("pre", "post")]
-    + ["richieste_api"]
+    + ["richieste_api", "cache_hit"]
 )
 
 
@@ -161,6 +217,64 @@ class RateLimitExceeded(Exception):
     pass
 
 
+class CursorPaginationRequired(Exception):
+    """HTTP 422 'Pagination with the page parameter is not supported for large
+    datasets, please use cursor based pagination (after/before)'.
+
+    Sollevata dal client quando l'API rifiuta la paginazione con `page`:
+    il chiamante (paginate) riparte con la paginazione a cursori. Non e' un
+    errore definitivo di recupero: e' un invito a cambiare modalita'."""
+
+
+def parse_link_header(header):
+    """Header Link RFC 5988 -> {rel: url}. Esempio di risposta GitHub:
+    '<...&after=abc>; rel="after", <...&page=3>; rel="next"'."""
+    out = {}
+    if not header:
+        return out
+    for part in str(header).split(","):
+        m = re.search(r'<([^>]+)>\s*;\s*rel="([^"]+)"', part)
+        if m:
+            out[m.group(2)] = m.group(1)
+    return out
+
+
+# Interruzioni temporanee della connessione: si riprova con backoff.
+# (http.client.RemoteDisconnected e' una sottoclasse di ConnectionResetError,
+#  ma viene nominato esplicitamente per chiarezza.)
+TRANSIENT_NET_ERRORS = (
+    http.client.RemoteDisconnected,
+    ConnectionResetError,
+    ConnectionAbortedError,
+    ConnectionRefusedError,
+    BrokenPipeError,
+    TimeoutError,             # include socket.timeout (alias in Python 3.10+)
+)
+
+# cattura completa delle eccezioni di rete/gestite dal client
+NETWORK_CATCH = (urllib.error.URLError,) + TRANSIENT_NET_ERRORS
+
+
+def is_transient_network_error(exc):
+    """True se `exc` e' un'interruzione TEMPORANEA della connessione.
+
+    Distingue i veri errori transitori da URLError con motivo non di rete
+    (es. errori TLS/certificati o motivi arbitrari): questi ultimi non
+    vengono riprovati, perch'equale ripetere la stessa richiesta."""
+    if isinstance(exc, TRANSIENT_NET_ERRORS):
+        return True
+    if isinstance(exc, urllib.error.URLError):
+        reason = getattr(exc, "reason", None)
+        if isinstance(reason, TRANSIENT_NET_ERRORS):
+            return True
+        if isinstance(reason, ssl.SSLError):
+            return False        # certificati/TLS: non transitorio
+        if isinstance(reason, OSError):
+            return True         # DNS, refused, reset, timeout generici
+        return False            # motivo non di rete: non transitorio
+    return False
+
+
 class GitHubClient:
     """Client REST con cache su disco, contatore richieste e rispetto rate limit."""
 
@@ -172,6 +286,9 @@ class GitHubClient:
         self.requests = 0            # richieste API reali (cache esclusa)
         self.cache_hits = 0
         self.by_repo = {}            # repo -> richieste reali
+        self.cache_by_repo = {}      # repo -> cache hit
+        self.by_kind = {}            # tipologia dato -> richieste reali
+        self.cache_by_kind = {}      # tipologia dato -> cache hit
         self.current_repo = "-"
         self.rate_remaining = None
         self.rate_reset = None
@@ -180,16 +297,22 @@ class GitHubClient:
         self._last_search = 0.0
 
     # --- contatori ---
-    def _count(self):
+    def _count(self, kind="altro"):
         with self.lock:
             self.requests += 1
             self.by_repo[self.current_repo] = self.by_repo.get(self.current_repo, 0) + 1
+            self.by_kind[kind] = self.by_kind.get(kind, 0) + 1
 
     def _cache_path(self, url):
         h = hashlib.sha1(url.encode("utf-8")).hexdigest()
         return CACHE_DIR / (h + ".json")
 
     def _cache_read(self, url):
+        """Entry di cache {url, ts, body, link?} oppure None.
+
+        `link` (header Link della risposta) e' presente solo nelle entry
+        scritte dalla versione corrente: le entry vecchie lo hanno assente
+        e paginate provvede a rifare la richiesta quando serve il header."""
         if not self.cache_enabled:
             return None
         p = self._cache_path(url)
@@ -197,18 +320,25 @@ class GitHubClient:
             return None
         try:
             with open(p, encoding="utf-8") as f:
-                return json.load(f)["body"]
+                entry = json.load(f)
+            if isinstance(entry, dict) and "body" in entry:
+                return entry
+            return None
         except Exception:
             return None
 
-    def _cache_write(self, url, body):
+    def _cache_write(self, url, body, link=None):
         if not self.cache_enabled:
             return
         try:
             CACHE_DIR.mkdir(parents=True, exist_ok=True)
             tmp = self._cache_path(url).with_suffix(".tmp")
+            entry = {"url": url, "ts": datetime.now(timezone.utc).isoformat(),
+                     "body": body}
+            if link:
+                entry["link"] = link
             with open(tmp, "w", encoding="utf-8") as f:
-                json.dump({"url": url, "ts": datetime.now(timezone.utc).isoformat(), "body": body}, f)
+                json.dump(entry, f)
             tmp.replace(self._cache_path(url))
         except Exception:
             pass
@@ -237,13 +367,36 @@ class GitHubClient:
         time.sleep(wait)
         self.rate_remaining = None
 
-    def get(self, url, repo=None, is_search=False):
-        """GET JSON. Ritorna il body; lancia RateLimitExceeded se non si puo' procedere."""
-        cached = self._cache_read(url)
-        if cached is not None:
-            with self.lock:
-                self.cache_hits += 1
-            return cached
+    def get(self, url, repo=None, is_search=False, kind="altro",
+            want_link=False, force=False):
+        """GET JSON. Ritorna il body; con want_link=True ritorna (body, header Link).
+
+        - force=True: salta la lettura da cache (serve a paginate per ottenere
+          l'header Link di una pagina cachata senza header);
+        - se l'URL e' gia' presente in cache con dati validi, la richiesta di
+          rete non viene ripetuta (nessun retry, nessun contatore richieste);
+        - HTTP 422 'cursor based pagination' -> CursorPaginationRequired
+          (vedi paginate: riparte senza il parametro `page`);
+        - interruzioni temporanee della connessione (RemoteDisconnected,
+          ConnectionResetError, TimeoutError, URLError con motivo di rete):
+          fino a MAX_TRANSIENT_ATTEMPTS=5 tentativi complessivi con backoff
+          progressivo TRANSIENT_BACKOFF (2, 4, 8, 16, 30 s). Se tutti
+          falliscono viene lanciato RuntimeError, gestito da analyze_repo
+          (stato 'parziale'/'errore'): la richiesta fallita NON viene mai
+          interpretata come risposta vuota;
+        - HTTP 403/429, 5xx e rate limit: gestione invariata.
+
+        Lancia RateLimitExceeded se non si puo' procedere."""
+        if not force:
+            entry = self._cache_read(url)
+            if entry is not None:
+                with self.lock:
+                    self.cache_hits += 1
+                    self.cache_by_kind[kind] = self.cache_by_kind.get(kind, 0) + 1
+                    self.cache_by_repo[self.current_repo] = \
+                        self.cache_by_repo.get(self.current_repo, 0) + 1
+                body = entry.get("body")
+                return (body, entry.get("link")) if want_link else body
 
         if is_search:
             # limite search separato (30/min autenticati, 10/min anonimi): pacing
@@ -265,22 +418,30 @@ class GitHubClient:
             headers["Authorization"] = f"Bearer {self.token}"
 
         last_err = None
-        for attempt in range(MAX_RETRIES):
-            self._count()
+        http_attempt = 0      # tentativi per gli errori HTTP (403/429/5xx)
+        transient_tries = 0   # interruzioni temporanee della connessione
+        while http_attempt < MAX_RETRIES:
+            self._count(kind)
             req = urllib.request.Request(url, headers=headers, method="GET")
             try:
                 with urllib.request.urlopen(req, timeout=60) as resp:
                     self._update_rate(resp.headers)
+                    link = resp.headers.get("Link") or resp.headers.get("link")
                     body = json.loads(resp.read().decode("utf-8", "replace"))
-                self._cache_write(url, body)
-                return body
+                self._cache_write(url, body, link)
+                return (body, link) if want_link else body
             except urllib.error.HTTPError as e:
+                # --- gestione HTTP invariata (403 rate limit, 403/429,
+                #     5xx, 4xx definitivi) ---
                 self._update_rate(e.headers)
                 msg = ""
                 try:
                     msg = json.loads(e.read().decode("utf-8", "replace")).get("message", "")
                 except Exception:
                     pass
+                if e.code == 422 and "cursor based pagination" in msg.lower():
+                    # dataset troppo grande per `page`: paginate riparte con i cursori
+                    raise CursorPaginationRequired(msg or "cursor based pagination")
                 if e.code == 403 and "rate limit" in msg.lower():
                     # rate limit primario esaurito: attendi il reset
                     reset = int(e.headers.get("X-RateLimit-Reset") or time.time())
@@ -289,27 +450,45 @@ class GitHubClient:
                         raise RateLimitExceeded(f"rate limit esaurito, reset tra {wait}s")
                     print(f"  [RATE] 403 rate limit, attendo {wait}s...")
                     time.sleep(wait)
+                    http_attempt += 1
                     continue
                 if e.code in (403, 429):
                     # secondary rate limit / throttling: Retry-After o backoff
                     ra = e.headers.get("Retry-After")
-                    wait = int(ra) if ra and ra.isdigit() else min(60 * (attempt + 1), 180)
+                    wait = int(ra) if ra and ra.isdigit() else min(60 * (http_attempt + 1), 180)
                     print(f"  [THROTTLE] HTTP {e.code}: {msg[:80]} -> attendo {wait}s")
                     time.sleep(wait)
+                    http_attempt += 1
                     continue
                 if e.code >= 500:
-                    time.sleep(2 ** attempt)
+                    time.sleep(2 ** http_attempt)
                     last_err = f"HTTP {e.code}: {msg[:120]}"
+                    http_attempt += 1
                     continue
                 # errore 4xx definitivo (404, 422, ...)
                 self.errors.append(f"{self.current_repo}: HTTP {e.code} {msg[:100]}")
                 raise RuntimeError(f"HTTP {e.code}: {msg[:120]}")
-            except urllib.error.URLError as e:
-                last_err = str(e)[:120]
-                time.sleep(2 ** attempt)
-            except TimeoutError:
-                last_err = "timeout"
-                time.sleep(2 ** attempt)
+            except NETWORK_CATCH as e:
+                # --- interruzioni temporanee della connessione ---
+                if not is_transient_network_error(e):
+                    # URLError con motivo non di rete (es. TLS/certificati):
+                    # ripetere la stessa richiesta non serve
+                    self.errors.append(f"{self.current_repo}: {e}")
+                    raise RuntimeError(
+                        f"richiesta fallita (errore non transitorio): {e}") from e
+                transient_tries += 1
+                last_err = f"{type(e).__name__}: {e}"[:120]
+                # backoff progressivo: 2, 4, 8, 16, 30 secondi
+                time.sleep(TRANSIENT_BACKOFF[
+                    min(transient_tries, len(TRANSIENT_BACKOFF)) - 1])
+                if transient_tries >= MAX_TRANSIENT_ATTEMPTS:
+                    # tutti i tentativi esauriti: errore gestibile da
+                    # analyze_repo (stato parziale/errore, mai 'ok')
+                    self.errors.append(f"{self.current_repo}: {last_err}")
+                    raise RuntimeError(
+                        f"connessione interrotta dopo {MAX_TRANSIENT_ATTEMPTS} "
+                        f"tentativi: {last_err}") from e
+                continue
         self.errors.append(f"{self.current_repo}: {last_err}")
         raise RuntimeError(f"richiesta fallita dopo {MAX_RETRIES} tentativi: {last_err}")
 
@@ -317,60 +496,164 @@ class GitHubClient:
         """total_count di una search (1 richiesta)."""
         q = urllib.parse.quote(query)
         url = f"{API}/search/issues?q={q}&per_page=1"
-        body = self.get(url, is_search=True)
+        body = self.get(url, is_search=True, kind="search (stima)")
         return int(body.get("total_count", 0))
 
 
 # ---------------------------------------------------------------------- fetch
 
-def paginate(client, url_base, params, cutoff_iso, repo):
-    """Pagina un endpoint con `since`/`sort=created` fino a superare il cutoff.
+def paginate(client, url_base, params, cutoff_iso, repo, kind="lista PR+Issue",
+             field="created_at"):
+    """Pagina un endpoint in ordine DECRESCENTE su `field` fino al cutoff.
 
-    - url_base: es. /repos/o/r/pulls  (params: state, sort, direction, since...)
-    - cutoff_iso: data ISO; la paginazione si ferma quando la data di creazione
-      dell'ultimo elemento della pagina e' < cutoff (gli elementi sono in ordine
-      decrescente di creazione con sort=created&direction=desc).
-    Ritorna la lista completa degli item.
+    Strategia di paginazione (gestisce l'errore HTTP 422 dei repository
+    grandi: 'Pagination with the page parameter is not supported for large
+    datasets, please use cursor based pagination (after/before)'):
+
+    1. si parte con l'URL storico `page=1` (stessa identica stringa delle
+       precedenti esecuzioni => la cache su disco continua a valere);
+    2. la richiesta successiva segue l'header Link: ha la precedenza il
+       cursore `after` (paginazione cursor, nessun parametro `page`), poi
+       `next` (paginazione classica `page`, per gli endpoint/casi che la
+       supportano ancora);
+    3. se l'API risponde 422 'cursor based pagination' (dataset grande),
+       l'intera paginazione RIPARTE da capo SENZA il parametro `page`,
+       seguendo i cursori `after`: l'elenco accumulato viene azzerato, quindi
+       non possono nascere duplicati ne' omissioni;
+    4. se il rifiuto dei cursori persiste, o si supera MAX_PAGES, o la
+       risposta non e' una lista, si lancia l'errore: un elenco parziale non
+       viene mai restituito come completo (il chiamante marca 'parziale').
+
+    Cache: l'header Link di ogni pagina viene salvato in cache; per le entry
+    vecchie (senza header) che contengono una pagina piena, la richiesta viene
+    rifatta una volta in rete per recuperare l'header e poter proseguire.
+
+    Deduplica per `id` su tutte le pagine (e dopo ogni ripartenza).
+    - cutoff_iso: alla prima occorrenza con field < cutoff la paginazione si
+      ferma (ordinamento discendente: tutto cio' che serve e' gia' stato visto);
+    - cutoff_iso=None: paginazione a esaurimento.
     """
-    items = []
-    page = 1
+    base_qs = urllib.parse.urlencode(dict(params, per_page=PER_PAGE))
     cutoff = parse_ts(cutoff_iso)
-    while True:
-        params = dict(params, per_page=PER_PAGE, page=page)
-        qs = urllib.parse.urlencode(params)
-        body = client.get(f"{API}{url_base}?{qs}", repo=repo)
-        if not isinstance(body, list):
-            raise RuntimeError(f"risposta inattesa da {url_base}: {type(body).__name__}")
-        items.extend(body)
-        if len(body) < PER_PAGE:
-            break
-        oldest = min((parse_ts(it.get("created_at")) for it in body if it.get("created_at")),
-                     default=None)
-        if oldest is None or (cutoff and oldest < cutoff):
-            break
-        page += 1
-        if page > 500:  # sicurezza
-            break
-    return items
+    cursor_mode = False
+
+    while True:                      # loop di ripartenza (solo su 422 cursor)
+        items, seen = [], set()      # azzera: mai duplicati dopo un restart
+        url = (f"{API}{url_base}?{base_qs}" if cursor_mode
+               else f"{API}{url_base}?{base_qs}&page=1")
+        n_pages = 0
+        try:
+            while True:
+                n_pages += 1
+                if n_pages > MAX_PAGES:
+                    raise RuntimeError(
+                        f"paginazione oltre {MAX_PAGES} pagine su {url_base}: "
+                        "elenco non completo")
+                body, link = client.get(url, repo=repo, kind=kind, want_link=True)
+                if not isinstance(body, list):
+                    raise RuntimeError(
+                        f"risposta inattesa da {url_base}: {type(body).__name__}")
+                # entry di cache senza header Link ma pagina piena: serve il
+                # header per sapere se ci sono altre pagine -> rifai in rete
+                if link is None and len(body) >= PER_PAGE:
+                    body, link = client.get(url, repo=repo, kind=kind,
+                                            want_link=True, force=True)
+                    if not isinstance(body, list):
+                        raise RuntimeError(
+                            f"risposta inattesa da {url_base}: {type(body).__name__}")
+
+                stop = False
+                for it in body:
+                    if cutoff is not None:
+                        ts = parse_ts(it.get(field))
+                        if ts is not None and ts < cutoff:
+                            stop = True      # ordinamento discendente: il resto
+                            break            # e' piu' vecchio del cutoff
+                    key = it.get("id")
+                    if key is None:
+                        key = (it.get("url"), it.get("number"))
+                    if key in seen:
+                        continue             # nessun duplicato tra pagine
+                    seen.add(key)
+                    items.append(it)
+
+                if stop or len(body) < PER_PAGE:
+                    return items
+                links = parse_link_header(link)
+                nxt = links.get("after") or links.get("next")
+                if nxt is None:
+                    # nessun Link successivo: ultima pagina (GitHub omite
+                    # l'header quando non ci sono altri risultati)
+                    return items
+                url = nxt
+        except CursorPaginationRequired:
+            if cursor_mode:
+                # anche senza `page` l'API rifiuta: elenco non recuperabile
+                raise RuntimeError(
+                    f"paginazione cursor rifiutata da {url_base}: "
+                    "elenco non recuperato")
+            cursor_mode = True
+            continue               # riparte da capo senza `page`, senza duplicati
 
 
-def fetch_listing(client, repo, since_iso):
-    """Lista unica /issues?state=all&since=<since_iso> (issue + PR): tutto cio'
-    che e' stato aggiornato da since.
+def fetch_issues_listing(client, repo, since_iso):
+    """Issue + PR create da `since` (GET /issues, sort=created, since=updated).
 
-    Copre tutti gli insiemi serviti:
-      - issue create nella finestra: created >= inizio finestra => updated >= inizio;
-      - PR create nella finestra: idem;
-      - PR con attivita' nella finestra: una review (o qualsiasi modifica)
-        aggiorna updated_at, quindi una PR reviewata nella finestra rientra.
-    `since` e' un filtro lato server: la paginazione va a esaurimento
-    (cutoff=None), ordinando per created desc (campo stabile, niente scatti)."""
+    `since` filtra su updated_at ed e' innocuo ai nostri fini: ogni elemento
+    creato dopo `since` ha updated_at >= created_at >= since, quindi resta
+    inclusa; la paginazione si ferma a created_at < since, dove gli elementi
+    utili (creati nelle finestre) sono esauriti. Gli URL sono identici a
+    quelli della precedente esecuzione => compatibilita' della cache.
+    Su repository grandi l'endpoint rifiuta il parametro `page` (HTTP 422):
+    paginate() ripiega automaticamente sulla paginazione a cursori `after`
+    (vedi la docstring di paginate). Un errore di recupero resta un errore:
+    qui non viene mai restituito un elenco parziale.
+    Dato l'elenco, le metriche PR/Issue si filtrano su created_at."""
     return paginate(
         client, f"/repos/{repo}/issues",
         {"state": "all", "sort": "created", "direction": "desc",
          "since": f"{since_iso}T00:00:00Z"},
-        None, repo,
+        f"{since_iso}T00:00:00Z", repo, kind="lista issue+PR",
+        field="created_at",
     )
+
+
+def fetch_pulls_open(client, repo):
+    """Tutte le PR ancora aperte (a esaurimento)."""
+    return paginate(client, f"/repos/{repo}/pulls", {"state": "open"},
+                    None, repo, kind="lista PR aperte", field="created_at")
+
+
+def fetch_pulls_closed_recent(client, repo, since_iso):
+    """PR chiuse con updated_at >= inizio T-6 (sort=updated desc, cutoff su
+    updated_at).
+
+    Copre le PR che erano aperte durante le finestre e poi chiuse: la loro
+    chiusura finale e' >= inizio finestra e la chiusura e' essa stessa un
+    aggiornamento, quindi updated_at >= closed_at >= inizio finestra.
+    NON si filtra su updated_at <= fine finestra: una PR reviewata in
+    finestra e poi riaggiornata deve restare inclusa."""
+    return paginate(
+        client, f"/repos/{repo}/pulls",
+        {"state": "closed", "sort": "updated", "direction": "desc"},
+        f"{since_iso}T00:00:00Z", repo, kind="lista PR chiuse",
+        field="updated_at",
+    )
+
+
+def fetch_pull_candidates(client, repo, since_iso):
+    """Insieme completo delle PR che potevano ricevere review nelle finestre:
+    (aperte ora) UNIONE (chiuse con aggiornamento recente), dedotte per
+    number. E' anche il superset delle PR create nelle finestre (una PR creata
+    dopo T-6 ha updated_at >= created_at >= T-6 e rientra in una delle due
+    liste)."""
+    by_num = {}
+    for p in fetch_pulls_open(client, repo):
+        if p.get("number") is not None:
+            by_num[p["number"]] = p
+    for p in fetch_pulls_closed_recent(client, repo, since_iso):
+        by_num.setdefault(p.get("number"), p)
+    return list(by_num.values())
 
 
 def split_listing(items):
@@ -396,77 +679,82 @@ def active_for_reviews(prs, pre_start, post_end):
     return out
 
 
-def fetch_pull_detail(client, repo, number):
-    """GET /pulls/{n}: serve per additions/deletions (non presenti nella lista)."""
-    return client.get(f"{API}/repos/{repo}/pulls/{number}", repo=repo)
-
-
 def fetch_reviews(client, repo, number):
-    """Tutte le review di una PR (paginazione se > 100)."""
+    """Tutte le review di una PR (paginazione se > 100).
+
+    Solleva RuntimeError se la risposta non e' una lista o se la paginazione
+    supera MAX_PAGES: un elenco parziale non deve mai essere trattato come
+    completo (il chiamante lascia vuote le metriche review della finestra)."""
     out, page = [], 1
     while True:
         body = client.get(
             f"{API}/repos/{repo}/pulls/{number}/reviews?per_page={PER_PAGE}&page={page}",
-            repo=repo,
+            repo=repo, kind="review",
         )
         if not isinstance(body, list):
-            break
+            raise RuntimeError(f"risposta inattesa dalle review della PR #{number}")
         out.extend(body)
         if len(body) < PER_PAGE:
-            break
+            return out
         page += 1
-    return out
+        if page > MAX_PAGES:
+            raise RuntimeError(f"review della PR #{number}: paginazione oltre "
+                               f"{MAX_PAGES} pagine (elenco non completo)")
 
 
 # ------------------------------------------------------------------ metriche
 
-def pr_metrics(prs, details, start, end):
-    """prs: PR create nella FINESTRA (già filtrate dal chiamante).
-    details: {number: {additions, deletions}} per le PR create nella finestra."""
-    n = len(prs)
-    if n == 0:
-        return {m: None for m in PR_METRICS}
+def _distinct_authors(items):
+    """Conteggio autori/reviewer distinti: chiave = user.id, in alternativa
+    user.login (coerente su tutte le metriche). Utenti senza identificativo
+    non sono conteggiati (dato non attribuibile, non inventato)."""
+    keys = set()
+    for it in items:
+        u = it.get("user") or {}
+        k = u.get("id") if u.get("id") is not None else u.get("login")
+        if k is not None:
+            keys.add(k)
+    return len(keys)
 
-    closed = [p for p in prs if in_window(parse_ts(p.get("closed_at")), start, end)]
-    merged = [p for p in prs if in_window(parse_ts(p.get("merged_at")), start, end)]
-    still_open = n - len(closed)   # create nella finestra, non chiuse entro la fine
 
-    # tempo medio di merge: solo PR create qui e unite entro la fine della finestra
+def pr_metrics(prs_created, start, end):
+    """prs_created: PR CREATE nella finestra (filtrate dal chiamante su
+    created_at; start incluso, end escluso).
+
+    0 = conteggio corretto senza eventi; None = non calcolabile."""
+    n = len(prs_created)
+    # chiuse/merged entro la fine della finestra (created >= start, quindi
+    # closed_at/merged_at in [start, end) equivale a < end)
+    closed = [p for p in prs_created
+              if in_window(parse_ts(p.get("closed_at")), start, end)]
+    merged = [p for p in prs_created
+              if in_window(parse_ts(p.get("merged_at")), start, end)]
+
+    # tempo medio: solo PR effettivamente merged entro la fine della finestra
     merge_days = []
     for p in merged:
         c, m = parse_ts(p.get("created_at")), parse_ts(p.get("merged_at"))
         if c and m:
             merge_days.append((m - c).total_seconds() / 86400)
 
-    adds = [details[p["number"]]["additions"] for p in prs
-            if p.get("number") in details]
-    dels = [details[p["number"]]["deletions"] for p in prs
-            if p.get("number") in details]
-    tots = [a + d for a, d in zip(adds, dels)]
-
     return {
         "pr_aperte": n,
-        "pr_chiuse": len(closed),
         "pr_merged": len(merged),
-        "pr_aperte_alla_fine": still_open,
-        # denominatore: PR chiuse (merged e' sottoinsieme di chiuse)
-        "pr_pct_merge": round(100.0 * len(merged) / len(closed), 2) if closed else None,
+        # denominatore: PR create nella finestra e chiuse entro la fine della
+        # finestra (merged e' sottoinsieme di chiuse: merged_at implica closed_at)
+        "pr_pct_merge": (round(100.0 * len(merged) / len(closed), 2)
+                         if closed else None),
         "pr_tempo_medio_merge_giorni": mean(merge_days),
-        "pr_contributori": len({(p.get("user") or {}).get("login") for p in prs}
-                               - {None}),
-        "pr_media_add": mean(adds),
-        "pr_media_del": mean(dels),
-        "pr_media_tot": mean(tots),
+        "pr_contributori": _distinct_authors(prs_created),
     }
 
 
-def issue_metrics(issues, start, end):
-    """issues: issue create nella FINESTRA (PR gia' escluse)."""
-    n = len(issues)
-    if n == 0:
-        return {m: None for m in ISSUE_METRICS}
-
-    closed = [i for i in issues if in_window(parse_ts(i.get("closed_at")), start, end)]
+def issue_metrics(issues_created, start, end):
+    """issues_created: issue CREATE nella finestra (PR gia' escluse)."""
+    n = len(issues_created)
+    closed = [i for i in issues_created
+              if in_window(parse_ts(i.get("closed_at")), start, end)]
+    # tempo medio: solo issue effettivamente chiuse entro la fine della finestra
     close_days = []
     for i in closed:
         c, z = parse_ts(i.get("created_at")), parse_ts(i.get("closed_at"))
@@ -477,48 +765,56 @@ def issue_metrics(issues, start, end):
         "issue_aperte": n,
         "issue_chiuse": len(closed),
         "issue_tempo_medio_chiusura_giorni": mean(close_days),
-        "issue_contributori": len({(i.get("user") or {}).get("login") for i in issues}
-                                  - {None}),
-        # media dei commenti su tutte le issue create nella finestra
-        "issue_commenti_medi": mean([i.get("comments") or 0 for i in issues]),
-        # denominatore: issue create nella finestra
-        "issue_pct_chiusura": round(100.0 * len(closed) / n, 2),
+        "issue_contributori": _distinct_authors(issues_created),
+        # denominatore: TUTTE le issue create nella finestra
+        "issue_pct_chiusura": (round(100.0 * len(closed) / n, 2)
+                               if n else None),
     }
 
 
 def review_metrics(reviews_by_pr, prs_created, start, end):
-    """reviews_by_pr: {pr_number: [review...]}; reviews: inviate nella finestra
-    (filtro su submitted_at, non sulla data della PR).
-    prs_created: PR create nella finestra (per review/PR e prima review)."""
+    """reviews_by_pr: {pr_number: [review...]} per le PR candidate, con
+    recupero COMPLETO (il chiamante non chiama questa funzione se qualcosa e'
+    mancato); prs_created: PR create nella finestra (per la prima review).
+
+    Le review contano per submitted_at nella finestra, indipendentemente
+    dalla data della PR di appartenenza (una PR aperta prima di T-6 puo'
+    ricevere review in T-6/T+6)."""
     in_win = []
-    for num, revs in reviews_by_pr.items():
+    for revs in reviews_by_pr.values():
         for r in revs:
             if in_window(parse_ts(r.get("submitted_at")), start, end):
                 in_win.append(r)
 
-    n_prs = len(prs_created)
-    if n_prs == 0 and not in_win:
-        return {m: None for m in REVIEW_METRICS}
+    reviewers = set()
+    for r in in_win:
+        u = r.get("user") or {}
+        k = u.get("id") if u.get("id") is not None else u.get("login")
+        if k is not None:
+            reviewers.add(k)
 
-    # tempo alla prima review: PR create nella finestra con evento conclusivo
-    # (prima review) entro la fine della finestra
+    # prima review: solo PR create nella finestra, prima review successiva alla
+    # creazione e precedente alla fine della finestra
     first_days = []
     for p in prs_created:
-        revs = [parse_ts(r.get("submitted_at")) for r in reviews_by_pr.get(p["number"], [])]
-        revs = sorted(t for t in revs if t and t < end)
         c = parse_ts(p.get("created_at"))
-        if revs and c:
+        num = p.get("number")
+        if not c or num is None:
+            continue
+        revs = sorted(
+            t for t in (parse_ts(r.get("submitted_at"))
+                        for r in reviews_by_pr.get(num, []))
+            if t is not None and c < t < end
+        )
+        if revs:
             first_days.append((revs[0] - c).total_seconds() / 86400)
 
     return {
         "review_totale": len(in_win),
-        "review_reviewer_distinti": len({(r.get("user") or {}).get("login")
-                                         for r in in_win} - {None}),
-        # denominatore: PR create nella finestra
-        "review_per_pr": round(len(in_win) / n_prs, 2) if n_prs else None,
-        "review_approvate": sum(1 for r in in_win if r.get("state") == "APPROVED"),
-        "review_modifiche_richieste": sum(1 for r in in_win
-                                          if r.get("state") == "CHANGES_REQUESTED"),
+        "review_reviewer_distinti": len(reviewers),
+        # solo review inviate nella finestra
+        "review_approvate": sum(1 for r in in_win
+                                if r.get("state") == "APPROVED"),
         "review_tempo_medio_prima_review_giorni": mean(first_days),
     }
 
@@ -526,25 +822,83 @@ def review_metrics(reviews_by_pr, prs_created, start, end):
 # ----------------------------------------------------------------- selezione
 
 def load_events():
-    """Chiave = nome cartella repo in minuscolo (come git_analyzer)."""
+    """Chiave = owner/repository completo in minuscolo (evita collisioni tra
+    repository omonimi di owner diversi)."""
     events = {}
     with open(EVENTS_FILE, newline="", encoding="utf-8-sig") as f:
         for row in csv.DictReader(f):
-            key = (row.get("repository") or "").split("/")[-1].strip().lower()
-            events[key] = row
+            full = (row.get("repository") or "").strip()
+            events[full.lower()] = row
     return events
 
 
 def load_git_metrics():
-    """Righe di git_metrics.csv indicizzate per nome cartella in minuscolo."""
+    """Righe di git_metrics.csv indicizzate per owner/repository completo."""
     rows = {}
     if not GIT_METRICS_FILE.exists():
         return rows
     with open(GIT_METRICS_FILE, newline="", encoding="utf-8-sig") as f:
         for row in csv.DictReader(f):
-            key = (row.get("repository") or "").split("/")[-1].strip().lower()
-            rows[key] = row
+            full = (row.get("repository") or "").strip()
+            rows[full.lower()] = row
     return rows
+
+
+def normalize_repo_url(url):
+    """Qualsiasi forma di URL git -> 'owner/repository' minuscolo, o None."""
+    u = (url or "").strip()
+    # https://github.com/owner/repo(.git) | git@github.com:owner/repo(.git)
+    # ssh://git@github.com/owner/repo(.git) | git://github.com/owner/repo.git
+    m = re.search(r"[:/]([^/:]+/[^/]+?)(?:\.git)?/?$", u)
+    if not m:
+        return None
+    cand = m.group(1).strip().lower()
+    return cand if cand.count("/") == 1 else None
+
+
+def clone_remote_repo(folder):
+    """owner/repository (minuscolo) del remote origin del clone, o None."""
+    try:
+        p = subprocess.run(
+            ["git", "-C", str(folder), "remote", "get-url", "origin"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=60,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return None
+    if p.returncode != 0 or not p.stdout.strip():
+        return None
+    return normalize_repo_url(p.stdout.strip())
+
+
+def verify_clones(chosen):
+    """La cartella del clone si chiama come il repo finale, ma owner diversi
+    possono avere nomi omonimi: si confronta il remote origin per essere sicuri
+    che il clone sia davvero il repository richiesto.
+
+    Ritorna (tenuti, esclusioni); se il remote non e' leggibile si accetta
+    con un avviso stampato (identita' non verificabile)."""
+    kept, extra = [], []
+    for c in chosen:
+        full = (c["full"] or "").strip()
+        if "/" not in full:
+            # riga senza owner nel CSV: non confrontabile, si accetta com'e'
+            print(f"  [AVVISO] {full or '(senza nome)'}: riga senza owner/"
+                  "repository, clone non verificabile")
+            kept.append(c)
+            continue
+        remote = clone_remote_repo(c["folder"])
+        if remote is None:
+            print(f"  [AVVISO] {full}: remote del clone '{c['folder'].name}' "
+                  "non leggibile: identita' non verificata")
+            kept.append(c)
+        elif remote != full.lower():
+            extra.append((full,
+                          f"clone '{c['folder'].name}' appartiene a {remote} "
+                          "(omonimia risolta tramite remote origin)"))
+        else:
+            kept.append(c)
+    return kept, extra
 
 
 def select_repos(events, gm_rows, n_target, today, explicit=None):
@@ -553,17 +907,20 @@ def select_repos(events, gm_rows, n_target, today, explicit=None):
     Criteri (tutti richiesti):
       1. T1 identificato in adoption_events.csv;
       2. presente in git_metrics.csv con stato 'ok' (=> finestra T+6 completa
-         e controlli gia' eseguiti, non ripetuti);
+         e controlli gia' eseguiti, non ripetuti), associato per owner/name;
       3. finestra T-6 completa: il clone esiste e la sua prima commit e'
          anteriore o uguale a T1 - 6 mesi;
-      4. T1 non futuro.
+      4. T1 non futuro;
+      5. il clone locale corrisponde al repository (remote origin), per
+         risolvere le omonimie tra owner diversi.
+    L'ordine di scelta, senza --repo, e' quello di adoption_events.csv.
     Ritorna (scelti, esclusi, idonei_non_scelti) con motivazioni.
     """
     folders = {p.name.lower(): p for p in REPOS_DIR.iterdir() if p.is_dir()} \
         if REPOS_DIR.is_dir() else {}
 
     candidates, excluded = [], []
-    for key, ev in sorted(events.items(), key=lambda kv: kv[0]):
+    for key, ev in events.items():          # key = owner/repository completo
         full = ev.get("repository") or ""
         t1s = (ev.get("data") or "").strip()
         if not t1s:
@@ -585,7 +942,10 @@ def select_repos(events, gm_rows, n_target, today, explicit=None):
         if t1 > today:
             excluded.append((full, "T1 nel futuro"))
             continue
-        folder = folders.get(key)
+        # cartella del clone = nome finale del repo (l'identita' si verifica
+        # poi con il remote origin, vedi verify_clones)
+        folder_name = key.split("/")[-1].strip()
+        folder = folders.get(folder_name.lower())
         if folder is None:
             excluded.append((full, "clone locale non trovato"))
             continue
@@ -609,13 +969,17 @@ def select_repos(events, gm_rows, n_target, today, explicit=None):
         missing = want - {c["full"].lower() for c in chosen}
         for m in sorted(missing):
             excluded.append((m, "richiesto esplicitamente ma non idoneo"))
-        return chosen, excluded, []
+        kept, extra = verify_clones(chosen)
+        excluded.extend(extra)
+        return kept, excluded, []
 
-    # scelta deterministica: i primi n in ordine alfabetico tra gli idonei
+    # scelta deterministica: i primi n nell'ordine di adoption_events.csv
     chosen = candidates[:n_target]
     not_chosen = [(c["full"], "idoneo ma non selezionato (oltre i %d)" % n_target)
                   for c in candidates[n_target:]]
-    return chosen, excluded, not_chosen
+    kept, extra = verify_clones(chosen)
+    excluded.extend(extra)
+    return kept, excluded, not_chosen
 
 
 def first_commit_date(folder: Path):
@@ -659,14 +1023,35 @@ def iso(d: date) -> str:
     return d.isoformat()
 
 
+def windows_open_for(pr, pre_start, pre_end, post_start, post_end):
+    """Finestre durante le quali la PR era aperta (=> poteva ricevere review).
+
+    created < fine finestra e (mai chiusa oppure chiusa >= inizio finestra):
+    closed_at e' l'ultima chiusura, quindi se e' < inizio finestra la PR era
+    gia' chiusa quando la finestra e' cominciata (non ha potuto riceverci
+    review); se e' nulla o >= inizio, in qualche istante della finestra era
+    aperta."""
+    created = parse_ts(pr.get("created_at"))
+    if created is None:
+        return []
+    closed = parse_ts(pr.get("closed_at")) if pr.get("closed_at") else None
+    out = []
+    if created < pre_end and (closed is None or closed >= pre_start):
+        out.append("pre")
+    if created < post_end and (closed is None or closed >= post_start):
+        out.append("post")
+    return out
+
+
 def analyze_repo(client, cand, workers):
-    """Analizza un repository su entrambe le finestre.
-    Ritorna (riga_csv, note_errore)."""
+    """Analizza un repository su entrambe le finestre (14 metriche x 2).
+    Ritorna (riga_csv, errore_o_nota_o_None)."""
     repo, t1 = cand["full"], cand["t1"]
     pre_start, pre_end, post_start, post_end = windows_for(t1)
     client.current_repo = repo
     client.abort = None
     req_before = client.by_repo.get(repo, 0)
+    cache_before = client.cache_by_repo.get(repo, 0)
 
     row = {
         "repository": repo, "t1": cand["t1s"], "stato": "ok",
@@ -675,127 +1060,160 @@ def analyze_repo(client, cand, workers):
         "post_start": post_start.date().isoformat(),
         "post_end": post_end.date().isoformat(),
     }
-    notes = []
-
-    # Lista unica (issue + PR) con `since` = inizio T-6: copre le PR/issue
-    # create nelle finestre e le PR attive (e quindi reviewabili) in finestra.
+    notes = []    # dati mancanti/incompleti -> stato 'parziale'
+    errors = []   # elenchi non recuperati -> 'parziale' (o 'errore' se tutti)
+    issues = None # issue create da T-6 in poi (da /issues); None = mancante
+    pulls = None  # PR candidate (aperte ∪ chiuse recenti); None = mancante
     since_iso = pre_start.date().isoformat()
 
+    def finish(stato=None):
+        """Chiude la riga: conteggi e stato. 'ok' SOLO se tutto e' completo."""
+        row["richieste_api"] = client.by_repo.get(repo, 0) - req_before
+        row["cache_hit"] = client.cache_by_repo.get(repo, 0) - cache_before
+        prob = "; ".join(notes + errors)
+        if stato:
+            row["stato"] = stato
+        elif issues is None and pulls is None:
+            row["stato"] = "errore: " + (prob or "nessun dato recuperato")
+        elif prob:
+            row["stato"] = "parziale: " + prob
+        else:
+            row["stato"] = "ok"
+        err = client.abort or prob
+        if not err and stato:
+            err = stato
+        return row, err
+
+    # ---- 1) issue create da T-6 in poi (le PR si recuperano da /pulls) ----
     try:
-        listing = fetch_listing(client, repo, since_iso)
+        listing = fetch_issues_listing(client, repo, since_iso)
+        issues = split_listing(listing)[1]      # [1] = elementi senza 'pull_request'
     except RateLimitExceeded as e:
-        row["stato"] = f"interrotto: {e}"
-        return row, str(e)
-    except RuntimeError as e:
-        row["stato"] = f"errore: {e}"
-        return row, str(e)
-
-    pulls, issues = split_listing(listing)
-
-    # PR/issue create in ciascuna finestra
-    pulls_pre = [p for p in pulls if in_window(parse_ts(p.get("created_at")), pre_start, pre_end)]
-    pulls_post = [p for p in pulls if in_window(parse_ts(p.get("created_at")), post_start, post_end)]
-    issues_pre = [i for i in issues if in_window(parse_ts(i.get("created_at")), pre_start, pre_end)]
-    issues_post = [i for i in issues if in_window(parse_ts(i.get("created_at")), post_start, post_end)]
-
-    # details: additions/deletions servono solo per le PR create nelle finestre
-    # (1 richiesta a PR) -> stimabile; qui li scarichiamo in parallelo.
-    nums = sorted({p["number"] for p in pulls_pre + pulls_post})
-    details = {}
-    missing_reviews = 0
-
-    def _detail(num):
-        try:
-            d = fetch_pull_detail(client, repo, num)
-            return num, {"additions": d.get("additions", 0), "deletions": d.get("deletions", 0)}
-        except RateLimitExceeded as e:
-            with client.lock:
-                client.abort = client.abort or str(e)
-            return num, None
-        except RuntimeError:
-            return num, None
-
-    if nums:
-        with ThreadPoolExecutor(max_workers=workers) as ex:
-            for num, d in ex.map(_detail, nums):
-                if d is not None:
-                    details[num] = d
+        return finish(f"interrotto: {e}")
+    except (RuntimeError, OSError) as e:
+        # OSError: interruzione di connessione non convertita dal client ->
+        # mai trattata come assenza di issue (colonne vuote + stato parziale)
+        errors.append(f"elenco issue non recuperato: {e}")
     if client.abort:
-        row["stato"] = f"interrotto: {client.abort}"
-        row["richieste_api"] = client.by_repo.get(repo, 0) - req_before
-        return row, client.abort
-    missing_details = len(nums) - len(details)
-    if missing_details:
-        notes.append(f"dettagli PR mancanti: {missing_details}/{len(nums)}")
+        return finish(f"interrotto: {client.abort}")
 
-    # reviews: 1 richiesta a PR (paginata). Servono per entrambe le finestre:
-    # si considerano TUTTE le PR attive nella finestra (non solo quelle create
-    # qui), per non perdere le review su PR vecchie ricevute in questo periodo.
-    rev_nums = sorted({p["number"] for p in active_for_reviews(pulls, pre_start, post_end)})
+    # ---- 2) PR candidate: aperte ora ∪ chiuse con aggiornamento recente ----
+    # (superset sia delle PR create nelle finestre sia di quelle che hanno
+    #  potuto ricevere review durante T-6/T+6; vedi docstring e fetch_pull_candidates)
+    try:
+        pulls = fetch_pull_candidates(client, repo, since_iso)
+    except RateLimitExceeded as e:
+        return finish(f"interrotto: {e}")
+    except (RuntimeError, OSError) as e:
+        # idem: un errore di rete non e' un elenco PR vuoto
+        errors.append(f"elenco PR non recuperato: {e}")
+    if client.abort:
+        return finish(f"interrotto: {client.abort}")
+
+    # PR aperte almeno un istante in [T-6, T+6)
+    active = active_for_reviews(pulls, pre_start, post_end) \
+        if pulls is not None else None
+
+    # ---- 3) review: 1 richiesta a PR candidate, in parallelo ----
     reviews_by_pr = {}
+    failed_reviews = []
+    if active is not None:
+        rev_nums = sorted({p["number"] for p in active
+                           if p.get("number") is not None})
 
-    def _reviews(num):
-        try:
-            return num, fetch_reviews(client, repo, num)
-        except RateLimitExceeded as e:
-            with client.lock:
-                client.abort = client.abort or str(e)
-            return num, None
-        except RuntimeError:
-            return num, None
+        def _reviews(num):
+            try:
+                return num, fetch_reviews(client, repo, num)
+            except RateLimitExceeded as e:
+                with client.lock:
+                    client.abort = client.abort or str(e)
+                return num, None
+            except (RuntimeError, OSError):
+                # recupero fallito (dopo i retry del client): la PR finisce in
+                # failed_reviews -> 4 metriche review vuote + stato parziale,
+                # MAI una lista di review vuota considerata valida
+                return num, None
 
-    if rev_nums:
-        with ThreadPoolExecutor(max_workers=workers) as ex:
-            for num, revs in ex.map(_reviews, rev_nums):
-                if revs is None:
-                    missing_reviews += 1
-                else:
-                    reviews_by_pr[num] = revs
-    if client.abort:
-        row["stato"] = f"interrotto: {client.abort}"
-        row["richieste_api"] = client.by_repo.get(repo, 0) - req_before
-        return row, client.abort
-    if missing_reviews:
-        notes.append(f"review mancanti: {missing_reviews}/{len(rev_nums)}")
+        if rev_nums:
+            with ThreadPoolExecutor(max_workers=workers) as ex:
+                for num, revs in ex.map(_reviews, rev_nums):
+                    if revs is None:
+                        failed_reviews.append(num)
+                    else:
+                        reviews_by_pr[num] = revs
+        if client.abort:
+            return finish(f"interrotto: {client.abort}")
+        if failed_reviews:
+            # una PR il cui recupero e' fallito rende incompleta ogni finestra
+            # in cui quella PR era aperta: le 4 metriche review di quella
+            # finestra restano VUOTE (mai presentate come complete)
+            notes.append(f"review non recuperate per {len(failed_reviews)} PR "
+                         f"candidate (su {len(rev_nums)}): metriche review "
+                         "delle finestre interessate lasciate vuote")
 
-    # --- metriche per finestra ---
-    for suffix, pulls_w, issues_w, s, e in (
-        ("pre", pulls_pre, issues_pre, pre_start, pre_end),
-        ("post", pulls_post, issues_post, post_start, post_end),
-    ):
-        pr_m = pr_metrics(pulls_w, details, s, e)
-        is_m = issue_metrics(issues_w, s, e)
-        rv_m = review_metrics(reviews_by_pr, pulls_w, s, e)
-        for k, v in pr_m.items():
-            row[f"{k}_{suffix}"] = fmt(v)
-        for k, v in is_m.items():
-            row[f"{k}_{suffix}"] = fmt(v)
-        for k, v in rv_m.items():
-            row[f"{k}_{suffix}"] = fmt(v)
+    # completezza review per finestra
+    review_ok = {"pre": True, "post": True}
+    if active is None:
+        review_ok = {"pre": False, "post": False}
+    elif failed_reviews:
+        failed_set = set(failed_reviews)
+        for p in active:
+            if p.get("number") in failed_set:
+                for w in windows_open_for(p, pre_start, pre_end,
+                                          post_start, post_end):
+                    review_ok[w] = False
 
-    row["richieste_api"] = client.by_repo.get(repo, 0) - req_before
-    if notes:
-        row["stato"] = "ok con note: " + "; ".join(notes)
-    return row, None
+    # ---- 4) metriche per finestra ----
+    for suffix, s, e in (("pre", pre_start, pre_end),
+                         ("post", post_start, post_end)):
+        prs_w = ([p for p in active
+                  if in_window(parse_ts(p.get("created_at")), s, e)]
+                 if active is not None else None)
+        issues_w = ([i for i in issues
+                     if in_window(parse_ts(i.get("created_at")), s, e)]
+                    if issues is not None else None)
+
+        groups = [
+            pr_metrics(prs_w, s, e) if prs_w is not None else None,
+            issue_metrics(issues_w, s, e) if issues_w is not None else None,
+            review_metrics(reviews_by_pr, prs_w, s, e)
+            if (review_ok[suffix] and prs_w is not None) else None,
+        ]
+        for g in groups:
+            if g is None:
+                continue        # colonne lasciate vuote = dato mancante
+            for k, v in g.items():
+                row[f"{k}_{suffix}"] = fmt(v)
+
+    return finish()
 
 
 def estimate_requests(client, cand):
-    """Stima le richieste per un repo usando 2 search (PR e issue nel range)."""
+    """Stima le richieste per un repo con la strategia definita nella docstring.
+
+    - 2 search: PR e issue create nel range (stime per la selezione/report);
+    - pagine dell'elenco /issues (issue create da T-6 in poi);
+    - pagine di /pulls?state=open (a esaurimento) + /pulls?state=closed
+      (fino a updated_at < T-6): i PR candidate per le review;
+    - 1 richiesta di review per PR aperta almeno un istante in T-6/T+6.
+    Nessuna richiesta di dettaglio /pulls/{n}: non serve per le 14 metriche."""
     repo = cand["full"]
     since = add_months(cand["t1"], -WINDOW_MONTHS).isoformat()
     until = add_months(cand["t1"], WINDOW_MONTHS).isoformat()
     q_pr = f"repo:{repo} type:pr created:{since}..{until}"
     q_is = f"repo:{repo} type:issue created:{since}..{until}"
-    # PR attive nella finestra (per le review): create prima di T+6 e non
-    # chiuse prima di T-6 -> approx via updated nel range
-    q_act = f"repo:{repo} type:pr updated:{since}..{until}"
+    # PR candidate per le review: aperte ora (tutte le PR mai aperte) UNIONE
+    # chiuse con updated_at >= T-6 -> approx con updated:>=T-6 (sovrastima
+    # moderata, va bene per una stima)
+    q_act = f"repo:{repo} type:pr updated:>={since}"
     n_pr = client.search_count(q_pr)
     n_is = client.search_count(q_is)
     n_act = client.search_count(q_act)
-    # pagine della lista unica (/issues) + 1 detail per PR creata +
-    # 1 reviews per PR attiva
-    pages = -(-(n_pr + n_is) // PER_PAGE)
-    est = pages + n_pr + n_act
+    # pagine elenco issue + pagine liste PR (open a esaurimento + closed
+    # recenti, sovrapposte in parte) + 1 reviews per PR attiva
+    pages_issues = -(-(n_pr + n_is) // PER_PAGE)
+    pages_pulls = -(-n_pr // PER_PAGE) + -(-(n_act) // PER_PAGE)
+    est = pages_issues + pages_pulls + n_act
     return n_pr, n_is, est, n_act
 
 
@@ -803,29 +1221,25 @@ def estimate_requests(client, cand):
 
 def main():
     ap = argparse.ArgumentParser(description="Metriche GitHub (PR/Issue/Review) su T-6 / T+6")
-    ap.add_argument("--n", type=int, default=5, help="quanti repository analizzare (default 5)")
+    ap.add_argument("--n", type=int, default=1, help="quanti repository analizzare (default 1)")
     ap.add_argument("--repo", type=str, default="",
                     help="lista esplicita owner/name,owner/name (bypassa la selezione)")
     ap.add_argument("--concurrency", type=int, default=4,
                     help="richieste parallele per repo (default 4; max 8)")
     ap.add_argument("--dry-run", action="store_true",
-                    help="selezione + stima richieste, senza scaricare i dettagli")
-    ap.add_argument("--by-size", action="store_true",
-                    help="seleziona i repository a minor volume (stima le richieste "
-                         "su una pool di candidati leggeri e prende i piu' piccoli)")
-    ap.add_argument("--pool", type=int, default=20,
-                    help="quanti candidati leggeri stimare con --by-size (default 20)")
+                    help="selezione + stima richieste, senza scaricare i dati")
     ap.add_argument("--no-cache", action="store_true", help="disabilita la cache su disco")
     args = ap.parse_args()
 
-    token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN") or ""
+    token = (os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+             or os.environ.get("YOSHI_GH_TOKEN") or "")
     if not token and not args.dry_run:
         print("ERRORE: nessun token trovato. Imposta la variabile d'ambiente "
-              "GITHUB_TOKEN (o GH_TOKEN) e riesegui.")
+              "GITHUB_TOKEN (o GH_TOKEN / YOSHI_GH_TOKEN) e riesegui.")
         return 1
     if not token:
         print("[AVVISO] nessun token: dry-run in anonimo (limite search 10/min). "
-              "Per il test completo serve GITHUB_TOKEN.")
+              "Per il test completo serve un token.")
     workers = max(1, min(args.concurrency, 8))
 
     if not EVENTS_FILE.exists():
@@ -844,28 +1258,14 @@ def main():
 
     if explicit:
         chosen, excluded, not_chosen = select_repos(events, gm_rows, args.n, today, explicit)
-        pool = chosen
     else:
-        # tutti gli idonei, per poterli ordinare per volume
+        # senza --repo: i primi args.n idonei NELL'ORDINE DI adoption_events.csv
+        # (nessun ordinamento alfabetico ne per volume)
         all_ok, excluded, _ = select_repos(events, gm_rows, len(events), today, None)
-        if args.by_size:
-            # proxy locale gratuito: commits nella finestra pre (git_metrics.csv)
-            def _commits(c):
-                v = (gm_rows.get(c["key"], {}) or {}).get("commits_pre") or ""
-                try:
-                    return int(v)
-                except ValueError:
-                    return 10 ** 9
-            ordered = sorted(all_ok, key=lambda c: (_commits(c), c["full"]))
-            pool = ordered[:max(args.pool, args.n)]
-            print(f"[by-size] pool stimata: {len(pool)} candidati leggeri "
-                  f"(ordinati per commits_pre; proxy locale, nessuna richiesta)")
-        else:
-            ordered = sorted(all_ok, key=lambda c: c["full"])
-            pool = ordered[:args.n]
-        chosen = pool
+        chosen = all_ok[:args.n]
         not_chosen = [(c["full"], "idoneo ma non selezionato (oltre i %d)" % args.n)
-                      for c in all_ok if c not in pool]
+                      for c in all_ok[args.n:]]
+    pool = chosen
 
     client = GitHubClient(token, cache=not args.no_cache)
 
@@ -879,21 +1279,9 @@ def main():
             print(f"   {c['full']}: stima non disponibile ({e})")
             continue
         est_by_repo[c["full"]] = (n_pr, n_is, n_act, est)
-        print(f"   {c['full']}: PR={n_pr} issue={n_is} PR_attive={n_act} -> ~{est} richieste "
-              f"(pagine lista + detail PR + reviews PR attive)")
-
-    if args.by_size and not explicit:
-        # scelta finale: i n con la stima piu' bassa
-        ordered = sorted(pool, key=lambda c: est_by_repo.get(c["full"], (0, 0, 0, 10 ** 9))[3])
-        chosen = [c for c in ordered if c["full"] in est_by_repo][:args.n]
-
-        def _why_not(c):
-            est = est_by_repo.get(c["full"])
-            if est is None:
-                return "stima non disponibile"
-            return f"idoneo ma fuori dalla selezione per volume (~{est[3]:,} richieste)"
-
-        not_chosen = [(c["full"], _why_not(c)) for c in all_ok if c not in chosen]
+        print(f"   {c['full']}: PR={n_pr} issue={n_is} PR_candidate_review={n_act} "
+              f"-> ~{est} richieste "
+              f"(pagine elenco issue + pagine liste PR + reviews PR candidate)")
 
     # ---- report selezione ----
     print("\n" + "=" * 70)
@@ -952,6 +1340,7 @@ def main():
         # salvataggio incrementale: non si perde nulla in caso di interruzione
         write_csv(rows)
         print(f"    stato={row.get('stato')}  richieste_repo={row.get('richieste_api')}  "
+              f"cache_hit_repo={row.get('cache_hit')}  "
               f"totale_finora={client.requests}  rate_rimasto={client.rate_remaining}")
         if str(row.get("stato", "")).startswith("interrotto"):
             restanti = [x["full"] for x in chosen[i:]]
@@ -963,15 +1352,20 @@ def main():
     print("\n" + "=" * 70)
     print("REPORT TEST")
     print("=" * 70)
-    print(f"{'repository':40} {'richieste':>10} {'stato':>12}")
+    print(f"{'repository':40} {'richieste':>10} {'cache_hit':>10} {'stato':>12}")
     for r in rows:
         print(f"{r.get('repository', ''):40} {str(r.get('richieste_api', '-')):>10} "
-              f"{str(r.get('stato', ''))[:12]:>12}")
+              f"{str(r.get('cache_hit', '-')):>10} {str(r.get('stato', ''))[:12]:>12}")
     print("-" * 70)
     print(f"Repository analizzati      : {len(rows)} / {len(chosen)}")
     print(f"Richieste API totali       : {client.requests}")
     print(f"  per repository           : "
           + ", ".join(f"{k}={v}" for k, v in sorted(client.by_repo.items())))
+    print(f"  per tipologia di dato    :")
+    for k in sorted(set(client.by_kind) | set(client.cache_by_kind)):
+        real = client.by_kind.get(k, 0)
+        hit = client.cache_by_kind.get(k, 0)
+        print(f"     {k:24} richieste={real:<6} cache_hit={hit:<6} totale_dati={real + hit}")
     print(f"Cache hit (non richieste)  : {client.cache_hits}")
     if client.rate_remaining is not None:
         reset = datetime.fromtimestamp(client.rate_reset, tz=timezone.utc) \
