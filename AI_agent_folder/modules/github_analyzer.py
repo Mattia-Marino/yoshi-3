@@ -1219,13 +1219,256 @@ def estimate_requests(client, cand):
 
 # --------------------------------------------------------------------- main
 
+# --------------------------------------------------------------- batch --
+def read_existing_rows():
+    """Legge results/github_metrics.csv esistente (se presente).
+
+    Ritorna (rows, ok_repos): tutte le righe gia' raccolte e l'insieme dei
+    repository DISTINTI (owner/repo) con stato esattamente 'ok'. Le righe
+    parziali/in errore possono essere ritentate; quelle 'ok' non vengono
+    mai rianalizzate e contano nel target."""
+    if not OUT_FILE.exists():
+        return [], set()
+    rows, index = [], {}
+    try:
+        with open(OUT_FILE, newline="", encoding="utf-8-sig") as f:
+            for r in csv.DictReader(f):
+                key = (r.get("repository") or "").strip()
+                if not key:
+                    continue
+                if key in index:
+                    # difetto preesistente: UNA sola riga per repository,
+                    # preferendo lo stato 'ok' (nessun risultato valido perso)
+                    i = index[key]
+                    if (str(r.get("stato", "")).strip() == "ok"
+                            and str(rows[i].get("stato", "")).strip() != "ok"):
+                        rows[i] = r
+                    continue
+                index[key] = len(rows)
+                rows.append(r)
+    except (OSError, csv.Error) as e:
+        print(f"[AVVISO] impossibile leggere {OUT_FILE}: {e} -> parto da zero",
+              flush=True)
+        return [], set()
+    ok = {r["repository"].strip() for r in rows
+          if str(r.get("stato", "")).strip() == "ok"}
+    return rows, ok
+
+
+def upsert_row(rows, new_row):
+    """Inserisce o aggiorna la riga di new_row['repository'] in `rows`.
+
+    - una riga esistente con stato 'ok' NON viene mai sovrascritta da un
+      risultato parziale/in errore e non vengono create righe duplicate;
+    - ogni altra combinazione aggiorna la riga esistente in place (retry).
+    Ritorna True se new_row e' stata effettivamente scritta."""
+    repo = (new_row.get("repository") or "").strip()
+    new_ok = str(new_row.get("stato", "")).strip() == "ok"
+    idxs = [i for i, r in enumerate(rows)
+            if (r.get("repository") or "").strip() == repo]
+    if not idxs:
+        rows.append(new_row)             # nessuna riga esistente: nessun rischio
+        return True                      # di duplicato (chiave assente)
+    # collasso di eventuali duplicati preesistenti (si tiene la prima riga)
+    for j in reversed(idxs[1:]):
+        del rows[j]
+    if str(rows[idxs[0]].get("stato", "")).strip() == "ok" and not new_ok:
+        return False                     # mai un 'ok' sovrascritto da peggio
+    rows[idxs[0]] = new_row              # retry/aggiornamento in place
+    return True
+
+
+def run_batch(client, events, gm_rows, args, workers, t_start, today, explicit):
+    """Modalita' batch sequenziale (--batch): UN repository alla volta, senza
+    alcuna analisi concorrente tra repository, fino a raggiungere
+    --target-success repository distinti con stato 'ok' nel CSV.
+
+    - legge results/github_metrics.csv all'avvio: i repository gia' 'ok'
+      (es. i 10 gia' presenti) contano nel target solo se ANCORA idonei
+      secondo select_repos() e non vengono rianalizzati;
+    - i repository parziali/in errore vengono ritentati e la loro riga
+      aggiornata in place (mai duplicata, mai un 'ok' sovrascritto);
+    - un errore di rete imprevisto su un repository viene registrato come
+      'errore' e il batch prosegue con il successivo; solo il rate limit
+      esaurito (RateLimitExceeded / stato 'interrotto') arresta il batch;
+    - criteri di selezione, metriche, finestre e struttura CSV invariati;
+    - salvataggio incrementale del CSV dopo ogni repository (scrittura
+      atomica: nessuna perdita in caso di interruzione);
+    - log leggibili con flush=True prima e dopo ogni analisi.
+    Ritorna 0 se il target e' raggiunto, 1 altrimenti."""
+    target = max(1, args.target_success)
+    rows, ok_set = read_existing_rows()
+
+    # ---- selezione: identici criteri della modalita' singola ----
+    # idoneita' calcolata SENZA filtro --repo, per validare anche i
+    # risultati 'ok' gia' raccolti al di fuori dell'eventuale lista esplicita
+    idonei, excluded, _ = select_repos(events, gm_rows, len(events),
+                                        today, None)
+    eligible = {c["full"] for c in idonei}
+    if explicit:
+        # --repo restringe i NUOVI lavori, non il merito dei risultati ok
+        want = {w.strip().lower() for w in explicit if w.strip()}
+        scope = [c for c in idonei if c["full"].lower() in want]
+        for name in sorted(want - {c["full"].lower() for c in scope}):
+            excluded.append((name, "richiesto esplicitamente ma non idoneo"))
+    else:
+        scope = idonei
+
+    # un risultato 'ok' del CSV conta nel target SOLO se il repository e'
+    # ancora idoneo secondo select_repos(); altrimenti resta nel CSV (non si
+    # eliminano risultati) ma non viene conteggiato
+    ok_valid = {r for r in ok_set if r in eligible}
+    stale_ok = ok_set - ok_valid
+    todo = [c for c in scope if c["full"] not in ok_set]
+    done = len(ok_valid)
+
+    print("=" * 60, flush=True)
+    print(f"AVANZAMENTO BATCH: {done}/{target} repository validi", flush=True)
+    print(f"Repository già completati: {done}", flush=True)
+    print(f"Repository ancora da completare: {max(0, target - done)}",
+          flush=True)
+    print("=" * 60, flush=True)
+    if stale_ok:
+        print(f"[NOTA] {len(stale_ok)} risultati 'ok' nel CSV non sono piu' "
+              "idonei: conservati ma NON conteggiati nel target "
+              f"({', '.join(sorted(stale_ok)[:3])}"
+              f"{', ...' if len(stale_ok) > 3 else ''}).", flush=True)
+    if excluded:
+        print(f"Esclusi dai criteri di idoneita': {len(excluded)}", flush=True)
+    if done >= target:
+        print(f"Target gia' raggiunto ({done}/{target}): "
+              "nessuna analisi da eseguire.", flush=True)
+        return 0
+    if not todo:
+        print(f"Nessun repository idoneo mancante: raggiunti {done}/{target} "
+              "(pool esaurito).", flush=True)
+        return 1
+    if args.dry_run:
+        print(f"\n[dry-run] verrebbero analizzati {min(len(todo), target - done)} "
+              f"repository (ordine di adoption_events.csv):", flush=True)
+        for i, c in enumerate(todo[:target - done], done + 1):
+            print(f"   [{i}/{target}] {c['full']}  T1={c['t1s']}", flush=True)
+        print("[dry-run] nessun dato scaricato.", flush=True)
+        return 0
+    if workers > 1:
+        print(f"[AVVISO] batch con --concurrency {workers}: le richieste "
+              "interne restano parallele; i repository sono comunque "
+              "elaborati uno alla volta.", flush=True)
+
+    processed, stop_reason = 0, None
+    for c in todo:
+        done = len(ok_valid)            # conta solo 'ok' distinti e idonei
+        if done >= target:
+            break
+        slot = done + 1                 # es. [11/40] con 10 gia' ok
+        print(f"\n[{slot}/{target}] INIZIO ANALISI: {c['full']}", flush=True)
+        print(f"T1: {c['t1s']}", flush=True)
+        print("Stato: analisi in corso...", flush=True)
+        t0 = time.time()
+        try:
+            row, err = analyze_repo(client, c, workers)
+        except RateLimitExceeded as e:
+            # rate limit esaurito: ARRESTO del batch (come in modalita' singola)
+            row = {"repository": c["full"], "t1": c["t1s"],
+                   "stato": f"interrotto: {e}"}
+            err = str(e)
+        except (RuntimeError, OSError) as e:
+            # errore di rete non previsto sfuggito ad analyze_repo
+            # (RemoteDisconnected, ConnectionResetError, TimeoutError, ...):
+            # registro il repository come fallito e passo al successivo,
+            # il batch NON si interrompe
+            row = {"repository": c["full"], "t1": c["t1s"],
+                   "stato": f"errore: {e}"}
+            err = str(e)
+        except Exception as e:
+            # rete di sicurezza: nessun errore imprevisto puo' interrompere
+            # l'intero batch (KeyboardInterrupt/SystemExit restano liberi)
+            row = {"repository": c["full"], "t1": c["t1s"],
+                   "stato": f"errore: {type(e).__name__}: {e}"}
+            err = str(e)
+        processed += 1
+        stato = str(row.get("stato", ""))
+        written = upsert_row(rows, row)
+        write_csv(rows)                 # salvataggio incrementale e sicuro
+        if stato == "ok":
+            ok_valid.add(c["full"])
+            print(f"\n[{slot}/{target}] COMPLETATA: {c['full']}", flush=True)
+            print("Esito: OK", flush=True)
+            print(f"Repository validi: {len(ok_valid)}/{target}", flush=True)
+        else:
+            esito = ("parziale" if stato.startswith("parziale")
+                     else "errore" if stato.startswith("errore")
+                     else stato)
+            motivo = err or stato or "motivo non disponibile"
+            print(f"\n[{slot}/{target}] ANALISI NON COMPLETATA: {c['full']}",
+                  flush=True)
+            print(f"Esito: {esito}", flush=True)
+            print(f"Motivo: {motivo}", flush=True)
+            print(f"[{slot}/{target}] Il repository non viene conteggiato "
+                  f"tra i {target} validi.", flush=True)
+            print("Passaggio al repository successivo...", flush=True)
+            if not written:
+                print("   (riga 'ok' esistente preservata)", flush=True)
+        print(f"    richieste_repo={row.get('richieste_api')}  "
+              f"cache_hit_repo={row.get('cache_hit')}  "
+              f"totale={client.requests}  rate_rimasto={client.rate_remaining}"
+              f"  tempo={time.time() - t0:.1f}s", flush=True)
+        if stato.startswith("interrotto"):
+            stop_reason = stato        # rate limit: stop (come in modalita' singola)
+            break
+
+    # ---- riepilogo finale (sul CSV, repository distinti) ----
+    status_by_repo = {}
+    for r in rows:
+        status_by_repo[(r.get("repository") or "").strip()] = \
+            str(r.get("stato", "")).strip()
+    # conteggiati solo gli 'ok' DISTINCTI che sono ancora idonei
+    n_ok = sum(1 for k, v in status_by_repo.items()
+               if v == "ok" and k in eligible)
+    n_ok_csv = sum(1 for v in status_by_repo.values() if v == "ok")
+    n_parz = sum(1 for v in status_by_repo.values() if v.startswith("parziale"))
+    n_ko = sum(1 for v in status_by_repo.values()
+               if v and v != "ok" and not v.startswith("parziale"))
+    mancanti = max(0, target - n_ok)
+
+    print("\n" + "=" * 60, flush=True)
+    print("RIEPILOGO BATCH", flush=True)
+    print("=" * 60, flush=True)
+    print(f"Repository validi (ok)    : {n_ok}/{target}", flush=True)
+    if n_ok_csv != n_ok:
+        print(f"  (di cui {n_ok_csv - n_ok} 'ok' nel CSV non piu' idonei: "
+              "conservati, non conteggiati)", flush=True)
+    print(f"Parziali                  : {n_parz}", flush=True)
+    print(f"Falliti / interrotti      : {n_ko}", flush=True)
+    print(f"Ancora mancanti vs target : {mancanti}", flush=True)
+    print(f"Analizzati in questa sessione: {processed}", flush=True)
+    print(f"Richieste API totali      : {client.requests} "
+          f"(cache hit {client.cache_hits})", flush=True)
+    if stop_reason:
+        print(f"Interrotto                : {stop_reason}", flush=True)
+    if client.rate_remaining is not None:
+        print(f"Rate limit residuo        : {client.rate_remaining}", flush=True)
+    print(f"Tempo totale              : {time.time() - t_start:.1f}s",
+          flush=True)
+    print(f"CSV: {OUT_FILE}", flush=True)
+    return 0 if n_ok >= target else 1
+
+
 def main():
     ap = argparse.ArgumentParser(description="Metriche GitHub (PR/Issue/Review) su T-6 / T+6")
     ap.add_argument("--n", type=int, default=1, help="quanti repository analizzare (default 1)")
     ap.add_argument("--repo", type=str, default="",
                     help="lista esplicita owner/name,owner/name (bypassa la selezione)")
+    ap.add_argument("--batch", action="store_true",
+                    help="modalita' batch sequenziale: un repository alla volta, "
+                         "fino a --target-success repository con stato 'ok' nel "
+                         "CSV (quelli gia' ok non vengono rianalizzati)")
+    ap.add_argument("--target-success", type=int, default=40,
+                    help="target totale di repository validi 'ok' nel CSV "
+                         "(default 40; include quelli gia' analizzati)")
     ap.add_argument("--concurrency", type=int, default=4,
-                    help="richieste parallele per repo (default 4; max 8)")
+                    help="richieste parallele per repo (default 4; max 8; "
+                         "in batch usa tipicamente 1)")
     ap.add_argument("--dry-run", action="store_true",
                     help="selezione + stima richieste, senza scaricare i dati")
     ap.add_argument("--no-cache", action="store_true", help="disabilita la cache su disco")
@@ -1256,6 +1499,14 @@ def main():
 
     explicit = [x for x in args.repo.split(",") if x.strip()] if args.repo else None
 
+    client = GitHubClient(token, cache=not args.no_cache)
+
+    if args.batch:
+        # modalita' batch sequenziale: un repository alla volta, con lettura
+        # del CSV esistente (i repository gia' 'ok' non vengono rianalizzati)
+        return run_batch(client, events, gm_rows, args, workers,
+                         t_start, today, explicit)
+
     if explicit:
         chosen, excluded, not_chosen = select_repos(events, gm_rows, args.n, today, explicit)
     else:
@@ -1266,8 +1517,6 @@ def main():
         not_chosen = [(c["full"], "idoneo ma non selezionato (oltre i %d)" % args.n)
                       for c in all_ok[args.n:]]
     pool = chosen
-
-    client = GitHubClient(token, cache=not args.no_cache)
 
     # ---- stima richieste (3 search per repo) ----
     print("\nSTIMA richieste API per repository (via search API):")
@@ -1326,7 +1575,10 @@ def main():
         return 0
 
     # ---- analisi ----
-    rows, errors = [], []
+    # le righe gia' raccolte (es. i 10 risultati 'ok') vengono preservate:
+    # il CSV si aggiorna in place (upsert), mai ripartito da zero
+    rows, _pre_ok = read_existing_rows()
+    session, errors = [], []
     for i, c in enumerate(chosen, 1):
         print(f"\n[{i}/{len(chosen)}] {c['full']} ...", flush=True)
         try:
@@ -1334,7 +1586,8 @@ def main():
         except RateLimitExceeded as e:
             row = {"repository": c["full"], "t1": c["t1s"], "stato": f"interrotto: {e}"}
             err = str(e)
-        rows.append(row)
+        upsert_row(rows, row)      # mai riga duplicata, mai 'ok' sovrascritto
+        session.append(row)
         if err:
             errors.append(f"{c['full']}: {err}")
         # salvataggio incrementale: non si perde nulla in caso di interruzione
@@ -1353,11 +1606,11 @@ def main():
     print("REPORT TEST")
     print("=" * 70)
     print(f"{'repository':40} {'richieste':>10} {'cache_hit':>10} {'stato':>12}")
-    for r in rows:
+    for r in session:
         print(f"{r.get('repository', ''):40} {str(r.get('richieste_api', '-')):>10} "
               f"{str(r.get('cache_hit', '-')):>10} {str(r.get('stato', ''))[:12]:>12}")
     print("-" * 70)
-    print(f"Repository analizzati      : {len(rows)} / {len(chosen)}")
+    print(f"Repository analizzati      : {len(session)} / {len(chosen)}")
     print(f"Richieste API totali       : {client.requests}")
     print(f"  per repository           : "
           + ", ".join(f"{k}={v}" for k, v in sorted(client.by_repo.items())))
@@ -1388,12 +1641,19 @@ def main():
 
 
 def write_csv(rows):
+    """Scrive il CSV completo (37 colonne, stesso schema di prima).
+
+    Scrittura atomica: prima su file temporaneo, poi sostituzione con
+    os.replace, cosi' un'interruzione non puo' mai lasciare un CSV parziale
+    o distruggere i risultati gia' raccolti."""
     OUT_FILE.parent.mkdir(parents=True, exist_ok=True)
-    with open(OUT_FILE, "w", newline="", encoding="utf-8-sig") as f:
+    tmp = OUT_FILE.with_suffix(".csv.tmp")
+    with open(tmp, "w", newline="", encoding="utf-8-sig") as f:
         w = csv.DictWriter(f, fieldnames=FIELDS, extrasaction="ignore")
         w.writeheader()
         for r in rows:
             w.writerow({k: r.get(k, "") for k in FIELDS})
+    os.replace(tmp, OUT_FILE)
 
 
 if __name__ == "__main__":
