@@ -17,9 +17,9 @@ import csv
 import subprocess
 from pathlib import Path
 
-REPOS_DIR = Path(r"C:\Users\geppe\Desktop\Cloning_repo")
+REPOS_DIR = Path(r"C:\Users\geppe\Desktop\cloning_repo2")
 OUT_DIR = Path(r"C:\Users\geppe\Desktop\Progetto_Tamburri\yoshi-3\AI_agent_folder\results")
-OUT_FILE = OUT_DIR / "adoption_events.csv"
+OUT_FILE = OUT_DIR / "adoption_events2.csv"
 
 TARGETS = {"claude.md", "agents.md", "gemini.md", "skill.md", "copilot-instructions.md"}
 

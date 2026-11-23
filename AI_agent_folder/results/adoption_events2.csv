@@ -1,0 +1,37 @@
+﻿repository,file,data,commit,autore,percorso
+lightpanda-io/browser,AGENTS.md,2026-05-08,1bc0ca6b8f337d7a9d62c803580b1bf5a0f47198,Navid EMAD,AGENTS.md
+browser-use/browser-use,CLAUDE.md,2025-05-25,eaa5a6b896368254d463dc9cc3ac0fb4cb8a7e21,Nick Sweeting,CLAUDE.md
+Comfy-Org/ComfyUI,AGENTS.md,2026-06-30,50e5270b86765bac2da70248d61050abba72b19f,comfyanonymous,AGENTS.md
+delta-io/delta,AGENTS.md,2026-10-06,4ad63be553cfe6c55e15e628ff532054fb0fc6dc,Tathagata Das,AGENTS.md
+ocaml/dune,CLAUDE.md,2025-10-04,6203a2483528d41187c2c6896b8d537cc399093c,Rudi Grinberg,CLAUDE.md
+elixir-lang/elixir,AGENTS.md,2026-06-15,1d599978f7d36ea6896b294b3d26d110212be7ab,José Valim,AGENTS.md
+block/goose,copilot-instructions.md,2025-11-10,a971a64007b7e05b2cb266708aed0b09c60f4def,Angie Jones,.github/copilot-instructions.md
+grafana/grafana,CLAUDE.md,2026-03-17,291db05e4ef48b1e01626fe2ba4027b3a0f70759,Gábor Farkas,CLAUDE.md
+facebook/infer,AGENTS.md,2026-03-05,39334565d599554417d08425b90434114bdb925a,Martin Trojer,AGENTS.md
+JuliaLang/julia,AGENTS.md,2025-05-29,b6c81ed7f211cc97e32c2ee8dcadef1be61517f8,Keno Fischer,AGENTS.md
+koel/koel,copilot-instructions.md,2025-08-27,ae4cf7853d82597f0b59a46885ce9a34c124934a,Phan An,.github/copilot-instructions.md
+langflow-ai/langflow,AGENTS.md,2026-02-27,922f86411b17fecb419974811def7d38d9f7229f,Gabriel Luiz Freitas Almeida,AGENTS.md
+meilisearch/meilisearch,AGENTS.md,2026-03-16,87a2b5a81910cb2d8e47f38f0cae8ef281f9bcf6,Kerollmops,AGENTS.md
+metabase/metabase,copilot-instructions.md,2025-07-24,afabd18f5674df9f3241b7e02ea98d08797ea897,Fraser,.github/copilot-instructions.md
+nodejs/node,AGENTS.md,2026-08-22,0c31886aa71f3b4ba457688b2bd0ec505b0f8c96,James M Snell,AGENTS.md
+nuxt/nuxt,copilot-instructions.md,2025-02-11,29bea9899f557e0859c493b56708a63a2073b7f8,Daniel Roe,.github/copilot-instructions.md
+ollama/ollama,AGENTS.md,2026-06-07,96201a623a62b4434ff434a0a4a6b5b247fce481,Jeffrey Morgan,AGENTS.md
+All-Hands-AI/OpenHands,SKILL.md,2026-10-06,ed815e141409c7b52991ab8d13c553b595da9165,Engel Nyst,.agents/skills/verify-openhands/SKILL.md
+penpot/penpot,AGENTS.md,2026-03-18,2d616cf9c0a8782c6e7e5ac7e75e92dc58594373,Andrey Antukh,common/AGENTS.md
+prometheus/prometheus,CLAUDE.md,2026-03-12,1b8efe937e9a8c9f3afd78c26e74a6653df72d98,Bryan Boreham,CLAUDE.md
+pytorch/pytorch,copilot-instructions.md,2025-11-04,4b12c0344d0b1a6536a2659c4e498c805efdc1f1,Karhou Tam,.github/copilot-instructions.md
+remix-run/react-router,AGENTS.md,2025-11-26,8f73c5c73f47691339efbf3c34fb7345a7435ed6,Mark Dalgleish,AGENTS.md
+roc-lang/roc,AGENTS.md,2026-03-26,9277592c89f7bd3fcaeb68afbaab80000cf8feae,Richard Feldman,AGENTS.md
+astral-sh/ruff,CLAUDE.md,2026-01-04,11b551c2befa7d9a8f4650b41794d9ea265ddc23,Charlie Marsh,CLAUDE.md
+rust-lang/rust,CLAUDE.md,2026-08-12,4615c4aee8f177ce66d0bddf65ec5337971c6f8c,jyn,CLAUDE.md
+rustdesk/rustdesk,CLAUDE.md,2025-06-14,c58fd145f23cc036f5d68e861814101e7e45b047,rustdesk,CLAUDE.md
+scala/scala3,AGENTS.md,2026-03-02,d56b32ae483c9de074f1cb4d47898a7793d6a9eb,Oliver Bračevac,AGENTS.md
+scylladb/scylladb,copilot-instructions.md,2025-08-06,902d70d6b291d737c66a3044a8da9fc5c84b0dc2,Emil Maskovsky,.github/copilot-instructions.md
+nextcloud/server,AGENTS.md,2026-06-02,bb01fbacbe263d3c4d09fee31384da87657d94c2,Andy Scherzinger,AGENTS.md
+modelcontextprotocol/servers,CLAUDE.md,2026-03-27,6e320090c030c439637c06ac197cbbecf8e1ec53,Zandereins,CLAUDE.md
+koalaman/shellcheck,CLAUDE.md,2026-05-15,68f243ea630ea2a6e1803649b149bd71f9cdd42b,Vidar Holen,.claude/CLAUDE.md
+apache/spark,AGENTS.md,2026-11-18,1eb60e70a238e6582c79f3376ef0b5cab0f84375,Ruifeng Zheng,python/pyspark/ml/connect/AGENTS.md
+github/spec-kit,AGENTS.md,2025-09-19,0889635e6659a6eea8f9a9b3819d2bb5071354f6,Den Delimarsky 🌺,AGENTS.md
+webpack/webpack,AGENTS.md,2026-03-14,20e6dd01bb02113e2490905c8f16e8e60fdc85ab,Xiao,AGENTS.md
+wireshark/wireshark,AGENTS.md,2026-09-22,fd8e749bacf5e960d7c902810389caaa71ac21eb,Peter Lemenkov,AGENTS.md
+yugabyte/yugabyte-db,CLAUDE.md,2026-02-21,b3137f04d8ebfdc76edfeaae569894378c177c01,Kai Franz,CLAUDE.md

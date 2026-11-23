@@ -8,8 +8,10 @@
 //   - i clone in C:\Users\geppe\Desktop\Cloning_repo
 //
 // Finestre:
-//   pre  = [T_1 - 6 mesi, T_1)
-//   post = [T_1, T_1 + 6 mesi)
+//
+//	pre  = [T_1 - 6 mesi, T_1)
+//	post = [T_1, T_1 + 6 mesi)
+//
 // Se T_1 + 6 mesi e' futuro (rispetto a oggi), la finestra post non e' completa:
 // nello stato del repo viene scritto "periodo_post_incompleto" e le colonne
 // post restano vuote (nessun confronto non omogeneo tra repo).
@@ -19,9 +21,10 @@
 // e' identica alla versione Python.
 //
 // Uso:
-//   go run git_analyzer.go                  # tutte le repo, 5 in parallelo
-//   go run git_analyzer.go -workers 8
-//   go run git_analyzer.go -only caddy,scrapy
+//
+//	go run git_analyzer.go                  # tutte le repo, 5 in parallelo
+//	go run git_analyzer.go -workers 8
+//	go run git_analyzer.go -only caddy,scrapy
 //
 // Output: results/git_metrics.csv
 package main
@@ -45,10 +48,10 @@ import (
 )
 
 const (
-	reposDir     = `C:\Users\geppe\Desktop\Cloning_repo`
+	reposDir     = `C:\Users\geppe\Desktop\cloning_repo2`
 	resultsDir   = `C:\Users\geppe\Desktop\Progetto_Tamburri\yoshi-3\AI_agent_folder\results`
-	eventsFile   = "adoption_events.csv"
-	outFile      = "git_metrics.csv"
+	eventsFile   = "adoption_events2.csv"
+	outFile      = "git_metrics2.csv"
 	windowMonths = 6
 	slackDays    = 40 // margine su --since/--until (git filtra per data di commit, non di autore)
 	gitTimeout   = time.Hour
@@ -350,17 +353,17 @@ func windowStats(commits []commit, locs []locEntry, tags []tagInfo,
 	}
 
 	return map[string]string{
-		"commits":                      strconv.Itoa(n),
-		"commit_mensili":               pyFloat(round1(float64(n) / windowMonths)),
-		"contributors":                 strconv.Itoa(len(ids)),
-		"contributors_attivi_mensili":  pyFloat(round1(float64(activeSum) / windowMonths)),
-		"righe_aggiunte":               strconv.FormatInt(addSum, 10),
-		"righe_rimosse":                strconv.FormatInt(delSum, 10),
-		"top1_contributor":             share(1),
-		"top3_contributor":             share(3),
-		"top5_contributor":             share(5),
-		"release":                      strconv.Itoa(releases),
-		"release_mensili":              pyFloat(round2(float64(releases) / windowMonths)),
+		"commits":                     strconv.Itoa(n),
+		"commit_mensili":              pyFloat(round1(float64(n) / windowMonths)),
+		"contributors":                strconv.Itoa(len(ids)),
+		"contributors_attivi_mensili": pyFloat(round1(float64(activeSum) / windowMonths)),
+		"righe_aggiunte":              strconv.FormatInt(addSum, 10),
+		"righe_rimosse":               strconv.FormatInt(delSum, 10),
+		"top1_contributor":            share(1),
+		"top3_contributor":            share(3),
+		"top5_contributor":            share(5),
+		"release":                     strconv.Itoa(releases),
+		"release_mensili":             pyFloat(round2(float64(releases) / windowMonths)),
 	}
 }
 

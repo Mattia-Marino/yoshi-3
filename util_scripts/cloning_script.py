@@ -3,7 +3,7 @@ import subprocess
 import sys
 
 FILE_LISTA = Path(r"C:\Users\geppe\Desktop\toClone.txt")
-CARTELLA_DESTINAZIONE = Path(r"C:\Users\geppe\Desktop\Cloning_repo")
+CARTELLA_DESTINAZIONE = Path(r"C:\Users\geppe\Desktop\cloning_repo2")
 
 
 def clona_repository() -> None:
