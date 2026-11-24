@@ -121,11 +121,11 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
-REPOS_DIR = Path(r"C:\Users\geppe\Desktop\Cloning_repo")
+REPOS_DIR = Path(r"C:\Users\geppe\Desktop\cloning_repo2")
 RESULTS_DIR = Path(r"C:\Users\geppe\Desktop\Progetto_Tamburri\yoshi-3\AI_agent_folder\results")
-EVENTS_FILE = RESULTS_DIR / "adoption_events.csv"
-GIT_METRICS_FILE = RESULTS_DIR / "git_metrics.csv"
-OUT_FILE = RESULTS_DIR / "github_metrics.csv"
+EVENTS_FILE = RESULTS_DIR / "adoption_events2.csv"
+GIT_METRICS_FILE = RESULTS_DIR / "git_metrics2.csv"
+OUT_FILE = RESULTS_DIR / "github_metrics2.csv"
 CACHE_DIR = Path(r"C:\Users\geppe\Desktop\Progetto_Tamburri\yoshi-3\AI_agent_folder\cache\github")
 
 API = "https://api.github.com"
